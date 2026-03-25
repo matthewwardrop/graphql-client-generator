@@ -2,6 +2,10 @@
 
 Generate typed, tab-completable Python clients from GraphQL schema files.
 
+> **Warning:** This project is in early beta. APIs may change without notice,
+> edge cases abound, and there are dragons. Use in production at your own risk.
+
+
 ## Installation
 
 ```bash
