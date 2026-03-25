@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from graphql_client_generator.parser import parse_schema
 
@@ -88,6 +90,7 @@ type Query {
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def minimal_schema_path(tmp_path: Path) -> Path:

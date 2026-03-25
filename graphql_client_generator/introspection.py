@@ -45,7 +45,7 @@ def fetch_schema_sdl(
         request_headers.update(headers)
 
     if session is not None:
-        response = session.post(endpoint, json=payload, headers=request_headers)  # type: ignore[union-attr]
+        response = session.post(endpoint, json=payload, headers=request_headers)  # type: ignore[attr-defined]
     else:
         response = requests.post(endpoint, json=payload, headers=request_headers)
 

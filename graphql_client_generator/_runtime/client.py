@@ -7,7 +7,6 @@ from typing import Any
 
 import requests
 
-from .builder import BuiltQuery
 from .model import (
     GraphQLModel,
     GraphQLResponse,
@@ -80,7 +79,11 @@ class GraphQLClientBase:
         enhanced_query = ensure_typenames(query)
         data = self._execute_raw(enhanced_query, variables, operation_name)
         return self._build_result_tree(
-            data, enhanced_query, variables, operation_name, operation_type,
+            data,
+            enhanced_query,
+            variables,
+            operation_name,
+            operation_type,
             result_cls=result_cls,
         )
 
@@ -105,7 +108,7 @@ class GraphQLClientBase:
         if "errors" in body:
             raise GraphQLError(body["errors"], body.get("data"))
 
-        return body.get("data", {})
+        return body.get("data", {})  # type: ignore[no-any-return]
 
     def _build_result_tree(
         self,
@@ -148,7 +151,10 @@ class _ResultRoot:
         for key, raw in data.items():
             py_key = to_snake_case(key)
             self.__dict__[py_key] = _coerce_response_value(
-                raw, type_registry, context, key,
+                raw,
+                type_registry,
+                context,
+                key,
             )
 
     def __getattr__(self, name: str) -> Any:
@@ -187,5 +193,3 @@ def _repr_top(value: Any) -> str:
         parts = [_repr_top(v) for v in value]
         return f"[{', '.join(parts)}]"
     return repr(value)
-
-

@@ -52,6 +52,7 @@ class GraphQLModel:
 # GraphQLResponse -- dynamic wrapper for response data
 # ---------------------------------------------------------------------------
 
+
 class GraphQLResponse:
     """Dynamic wrapper around a GraphQL response object.
 
@@ -78,7 +79,10 @@ class GraphQLResponse:
             if key != "__typename":
                 py_key = to_snake_case(key)
                 self.__dict__[py_key] = _coerce_response_value(
-                    raw, self._type_registry, context, key,
+                    raw,
+                    self._type_registry,
+                    context,
+                    key,
                 )
 
     def __getattr__(self, name: str) -> Any:
@@ -92,9 +96,7 @@ class GraphQLResponse:
                 value = _lazy_load_response_field(self, desc)
                 self.__dict__[name] = value
                 return value
-        raise FieldNotLoadedError(
-            f"Field '{name}' was not included in the query"
-        )
+        raise FieldNotLoadedError(f"Field '{name}' was not included in the query")
 
     # -- serialization ---------------------------------------------------------
 
@@ -124,6 +126,7 @@ class GraphQLResponse:
 # Response coercion helpers
 # ---------------------------------------------------------------------------
 
+
 def _coerce_response_value(
     raw: Any,
     type_registry: dict[str, type[GraphQLModel]],
@@ -139,10 +142,7 @@ def _coerce_response_value(
         child_context = _child_context(context, key) if context else None
         return GraphQLResponse(raw, model_cls, child_context, type_registry)
     if isinstance(raw, list):
-        return [
-            _coerce_response_value(item, type_registry, context, key)
-            for item in raw
-        ]
+        return [_coerce_response_value(item, type_registry, context, key) for item in raw]
     return raw
 
 
@@ -152,9 +152,7 @@ def _child_context(
     index: int | None = None,
 ) -> QueryContext:
     """Build a child ``QueryContext`` one level deeper."""
-    child_path = list(parent_ctx.path) + [
-        PathSegment(field_name=key, actual_name=key, index=index)
-    ]
+    child_path = list(parent_ctx.path) + [PathSegment(field_name=key, actual_name=key, index=index)]
     return QueryContext(
         client=parent_ctx.client,
         query_string=parent_ctx.query_string,
@@ -168,6 +166,7 @@ def _child_context(
 # ---------------------------------------------------------------------------
 # Lazy loading helpers (for GraphQLResponse)
 # ---------------------------------------------------------------------------
+
 
 def _find_descriptor(
     model_cls: type[GraphQLModel] | None,
@@ -252,6 +251,7 @@ def _lazy_load_response_field(
 # Utility helpers
 # ---------------------------------------------------------------------------
 
+
 def _unwrap_type_name(graphql_type: str) -> str:
     """Extract the base type name from a GraphQL type string like ``[Foo!]!``."""
     return graphql_type.replace("!", "").replace("[", "").replace("]", "").strip()
@@ -272,6 +272,7 @@ def _serialize_value(value: Any) -> Any:
 
 # -- repr helpers ----------------------------------------------------------
 
+
 def _format_response(obj: GraphQLResponse, indent: int) -> str:
     """Format a GraphQLResponse with its model type name."""
     name = obj._model_cls.__name__ if obj._model_cls else "GraphQLResponse"
@@ -288,9 +289,7 @@ def _format_response(obj: GraphQLResponse, indent: int) -> str:
         return f"{name}()"
 
     # Try compact (single-line) first.
-    compact_parts = [
-        f"{k}={_repr_value(v, 0)}" for k, v in items
-    ]
+    compact_parts = [f"{k}={_repr_value(v, 0)}" for k, v in items]
     compact = f"{name}({', '.join(compact_parts)})"
     if len(compact) <= 80:
         return compact

@@ -11,8 +11,10 @@ from graphql import (
     NameNode,
     OperationDefinitionNode,
     SelectionSetNode,
-    parse as gql_parse,
     print_ast,
+)
+from graphql import (
+    parse as gql_parse,
 )
 
 if TYPE_CHECKING:
@@ -53,8 +55,7 @@ def _insert_typenames_doc(doc: DocumentNode) -> DocumentNode:
 def _insert_typenames_ss(ss: SelectionSetNode) -> SelectionSetNode:
     """Recursively inject ``__typename`` into a selection set."""
     has_typename = any(
-        isinstance(sel, FieldNode) and sel.name.value == "__typename"
-        for sel in ss.selections
+        isinstance(sel, FieldNode) and sel.name.value == "__typename" for sel in ss.selections
     )
     new_selections = list(ss.selections)
     if not has_typename:
@@ -80,6 +81,7 @@ def _insert_typenames_ss(ss: SelectionSetNode) -> SelectionSetNode:
 # ---------------------------------------------------------------------------
 # Lazy-load query modification
 # ---------------------------------------------------------------------------
+
 
 def add_field_to_query(
     query: str,
@@ -118,7 +120,10 @@ def _add_field_to_doc(
     for defn in doc.definitions:
         if isinstance(defn, OperationDefinitionNode) and defn.selection_set:
             new_ss = _add_field_at_path(
-                defn.selection_set, list(path), field_name, sub_fields,
+                defn.selection_set,
+                list(path),
+                field_name,
+                sub_fields,
             )
             defn = OperationDefinitionNode(
                 operation=defn.operation,
@@ -151,7 +156,10 @@ def _add_field_at_path(
             sel_name = sel.alias.value if sel.alias else sel.name.value
             if sel_name == segment.field_name and sel.selection_set:
                 child_ss = _add_field_at_path(
-                    sel.selection_set, remaining, field_name, sub_fields,
+                    sel.selection_set,
+                    remaining,
+                    field_name,
+                    sub_fields,
                 )
                 sel = FieldNode(
                     alias=sel.alias,

@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
-
-import pytest
 
 from graphql_client_generator._runtime.serialization import (
     serialize_input,
     to_camel_case,
     to_snake_case,
 )
-
 
 # ---------------------------------------------------------------------------
 # to_camel_case
@@ -139,9 +135,7 @@ class TestSerializeInput:
         assert result["color"] == "RED"
 
     def test_dataclass_with_list(self):
-        inp = UserInput(
-            first_name="Alice", email="a@b.com", tags=["admin", "user"]
-        )
+        inp = UserInput(first_name="Alice", email="a@b.com", tags=["admin", "user"])
         result = serialize_input(inp)
         assert result["tags"] == ["admin", "user"]
 

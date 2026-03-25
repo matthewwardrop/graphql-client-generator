@@ -8,7 +8,6 @@ import pytest
 
 from graphql_client_generator.introspection import fetch_schema_sdl
 
-
 # A minimal introspection response that graphql-core can build a schema from.
 _MINIMAL_INTROSPECTION_RESPONSE = {
     "data": {
@@ -90,7 +89,9 @@ class TestFetchSchemaSdl:
 
     def test_uses_provided_headers(self):
         """Extra headers should be forwarded to the HTTP request."""
-        with patch("requests.post", return_value=_make_response(_MINIMAL_INTROSPECTION_RESPONSE)) as mock_post:
+        with patch(
+            "requests.post", return_value=_make_response(_MINIMAL_INTROSPECTION_RESPONSE)
+        ) as mock_post:
             fetch_schema_sdl(
                 "http://example.com/graphql",
                 headers={"Authorization": "Bearer token"},
@@ -110,16 +111,20 @@ class TestFetchSchemaSdl:
 
     def test_raises_on_http_error(self):
         """Non-OK HTTP responses should raise RuntimeError."""
-        with patch(
-            "requests.post",
-            return_value=_make_response({}, status_code=401, ok=False),
+        with (
+            patch(
+                "requests.post",
+                return_value=_make_response({}, status_code=401, ok=False),
+            ),
+            pytest.raises(RuntimeError, match="401"),
         ):
-            with pytest.raises(RuntimeError, match="401"):
-                fetch_schema_sdl("http://example.com/graphql")
+            fetch_schema_sdl("http://example.com/graphql")
 
     def test_raises_on_graphql_errors(self):
         """GraphQL errors in the response body should raise RuntimeError."""
         error_response = {"errors": [{"message": "Not authorized"}]}
-        with patch("requests.post", return_value=_make_response(error_response)):
-            with pytest.raises(RuntimeError, match="Not authorized"):
-                fetch_schema_sdl("http://example.com/graphql")
+        with (
+            patch("requests.post", return_value=_make_response(error_response)),
+            pytest.raises(RuntimeError, match="Not authorized"),
+        ):
+            fetch_schema_sdl("http://example.com/graphql")

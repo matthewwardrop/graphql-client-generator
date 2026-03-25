@@ -19,14 +19,24 @@ dependencies = [
     "requests",
     "mypy",
     "ruff",
+    "types-requests",
 ]
 
 [tool.hatch.envs.default.scripts]
-test = "pytest tests/ -v --cov=graphql_client_generator --cov-report=term-missing"
-lint = "ruff check ."
-format = "ruff format ."
-typecheck = "mypy graphql_client_generator"
-check = ["lint", "typecheck", "test"]
+tests = [
+    "unit-test",
+    "lint",
+]
+unit-test = "pytest tests/ -v --cov=graphql_client_generator --cov-report=term-missing"
+format = [
+    "ruff check --fix .",
+    "ruff format .",
+]
+lint = [
+    "ruff check .",
+    "ruff format --check",
+    "mypy graphql_client_generator",
+]
 
 [tool.ruff]
 line-length = 100
@@ -34,6 +44,9 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "TCH"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B018"]
 
 [tool.mypy]
 python_version = "3.10"

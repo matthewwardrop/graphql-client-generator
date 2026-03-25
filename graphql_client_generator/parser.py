@@ -26,9 +26,11 @@ from graphql.type import (
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FieldArgInfo:
     """One argument on a field."""
+
     name: str
     graphql_type: str
     python_type: str
@@ -39,9 +41,10 @@ class FieldArgInfo:
 @dataclass
 class FieldInfo:
     """A single field on a type or input."""
-    name: str                  # camelCase GraphQL name
-    graphql_type: str          # e.g. "String!", "[Int!]!"
-    python_type: str           # e.g. "str", "list[int]"
+
+    name: str  # camelCase GraphQL name
+    graphql_type: str  # e.g. "String!", "[Int!]!"
+    python_type: str  # e.g. "str", "list[int]"
     is_non_null: bool = False
     is_list: bool = False
     description: str = ""
@@ -51,6 +54,7 @@ class FieldInfo:
 @dataclass
 class TypeInfo:
     """A GraphQL object type (including Query, Mutation)."""
+
     name: str
     fields: list[FieldInfo] = field(default_factory=list)
     description: str = ""
@@ -60,6 +64,7 @@ class TypeInfo:
 @dataclass
 class EnumInfo:
     """A GraphQL enum type."""
+
     name: str
     values: list[str] = field(default_factory=list)
     description: str = ""
@@ -68,6 +73,7 @@ class EnumInfo:
 @dataclass
 class InputInfo:
     """A GraphQL input type."""
+
     name: str
     fields: list[FieldInfo] = field(default_factory=list)
     description: str = ""
@@ -77,6 +83,7 @@ class InputInfo:
 @dataclass
 class InterfaceInfo:
     """A GraphQL interface type."""
+
     name: str
     fields: list[FieldInfo] = field(default_factory=list)
     implementing_types: list[str] = field(default_factory=list)
@@ -86,6 +93,7 @@ class InterfaceInfo:
 @dataclass
 class UnionInfo:
     """A GraphQL union type."""
+
     name: str
     member_types: list[str] = field(default_factory=list)
     description: str = ""
@@ -94,6 +102,7 @@ class UnionInfo:
 @dataclass
 class SchemaInfo:
     """Everything extracted from a ``.graphqls`` file."""
+
     types: list[TypeInfo] = field(default_factory=list)
     enums: list[EnumInfo] = field(default_factory=list)
     inputs: list[InputInfo] = field(default_factory=list)
@@ -171,14 +180,13 @@ def parse_schema_from_text(schema_text: str) -> SchemaInfo:
             else:
                 info.types.append(type_info)
 
-
-
     return info
 
 
 # ---------------------------------------------------------------------------
 # Extractors
 # ---------------------------------------------------------------------------
+
 
 def _extract_type(gql_type: GraphQLObjectType) -> TypeInfo:
     return TypeInfo(
@@ -204,14 +212,16 @@ def _extract_input(gql_type: GraphQLInputObjectType) -> InputInfo:
         python_type_str = _graphql_type_to_python(f.type)
         is_non_null = isinstance(f.type, GraphQLNonNull)
         is_list = _is_list_type(f.type)
-        fields.append(FieldInfo(
-            name=name,
-            graphql_type=graphql_type_str,
-            python_type=python_type_str,
-            is_non_null=is_non_null,
-            is_list=is_list,
-            description=f.description or "",
-        ))
+        fields.append(
+            FieldInfo(
+                name=name,
+                graphql_type=graphql_type_str,
+                python_type=python_type_str,
+                is_non_null=is_non_null,
+                is_list=is_list,
+                description=f.description or "",
+            )
+        )
     return InputInfo(
         name=gql_type.name,
         fields=fields,
@@ -225,9 +235,8 @@ def _extract_interface(
 ) -> InterfaceInfo:
     implementing = []
     for name, t in type_map.items():
-        if isinstance(t, GraphQLObjectType):
-            if gql_type in t.interfaces:
-                implementing.append(name)
+        if isinstance(t, GraphQLObjectType) and gql_type in t.interfaces:
+            implementing.append(name)
     return InterfaceInfo(
         name=gql_type.name,
         fields=[_extract_field(name, f) for name, f in gql_type.fields.items()],
@@ -252,13 +261,15 @@ def _extract_field(name: str, gql_field: GraphQLField) -> FieldInfo:
 
     args = []
     for arg_name, arg in gql_field.args.items():
-        args.append(FieldArgInfo(
-            name=arg_name,
-            graphql_type=_type_to_string(arg.type),
-            python_type=_graphql_type_to_python(arg.type),
-            default=arg.default_value,
-            description=arg.description or "",
-        ))
+        args.append(
+            FieldArgInfo(
+                name=arg_name,
+                graphql_type=_type_to_string(arg.type),
+                python_type=_graphql_type_to_python(arg.type),
+                default=arg.default_value,
+                description=arg.description or "",
+            )
+        )
 
     return FieldInfo(
         name=name,
@@ -275,13 +286,14 @@ def _extract_field(name: str, gql_field: GraphQLField) -> FieldInfo:
 # Type string helpers
 # ---------------------------------------------------------------------------
 
+
 def _type_to_string(gql_type: Any) -> str:
     """Convert a graphql-core type to its schema string representation."""
     if isinstance(gql_type, GraphQLNonNull):
         return f"{_type_to_string(gql_type.of_type)}!"
     if isinstance(gql_type, GraphQLList):
         return f"[{_type_to_string(gql_type.of_type)}]"
-    return gql_type.name
+    return str(gql_type.name)
 
 
 _SCALAR_MAP: dict[str, str] = {

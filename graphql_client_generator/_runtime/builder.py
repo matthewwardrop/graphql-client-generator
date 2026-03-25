@@ -5,10 +5,10 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Variable placeholders
 # ---------------------------------------------------------------------------
+
 
 class _VariableNamespace:
     """Singleton namespace for query variable placeholders.
@@ -50,6 +50,7 @@ class VariableRef:
 # FieldSelector
 # ---------------------------------------------------------------------------
 
+
 class FieldSelector:
     """A field selection in a GraphQL query.
 
@@ -87,17 +88,18 @@ class FieldSelector:
                 for name, gql_type in self._arg_types.items()
             ]
             self.__signature__ = inspect.Signature(
-                params, return_annotation=FieldSelector,
+                params,
+                return_annotation=FieldSelector,
             )
-            arg_sig = ", ".join(
-                f"{n}: {t}" for n, t in self._arg_types.items()
-            )
+            arg_sig = ", ".join(f"{n}: {t}" for n, t in self._arg_types.items())
             self.__doc__ = f"{graphql_name}({arg_sig})"
 
     def _clone(self) -> FieldSelector:
         node = FieldSelector(
-            self._graphql_name, self._target_cls,
-            self._arg_types, self._arg_doc,
+            self._graphql_name,
+            self._target_cls,
+            self._arg_types,
+            self._arg_doc,
         )
         node._args = dict(self._args)
         node._sub_selections = list(self._sub_selections)
@@ -113,9 +115,7 @@ class FieldSelector:
         unknown argument name is provided.
         """
         if not self._arg_types:
-            raise TypeError(
-                f"Field '{self._graphql_name}' takes no arguments"
-            )
+            raise TypeError(f"Field '{self._graphql_name}' takes no arguments")
         for key in kwargs:
             if key not in self._arg_types:
                 raise TypeError(
@@ -126,7 +126,8 @@ class FieldSelector:
         # Check that all required arguments (non-null types ending with !)
         # are provided.
         missing = [
-            name for name, gql_type in self._arg_types.items()
+            name
+            for name, gql_type in self._arg_types.items()
             if gql_type.endswith("!") and name not in kwargs
         ]
         if missing:
@@ -141,7 +142,8 @@ class FieldSelector:
     # -- sub-selections via __getitem__ ----------------------------------------
 
     def __getitem__(
-        self, selections: FieldSelector | tuple[FieldSelector, ...],
+        self,
+        selections: FieldSelector | tuple[FieldSelector, ...],
     ) -> FieldSelector:
         """Set sub-field selections.
 
@@ -150,7 +152,8 @@ class FieldSelector:
         """
         # Validate required args before allowing sub-selections.
         missing = [
-            name for name, gql_type in self._arg_types.items()
+            name
+            for name, gql_type in self._arg_types.items()
             if gql_type.endswith("!") and name not in self._args
         ]
         if missing:
@@ -184,16 +187,14 @@ class FieldSelector:
                 desc = klass.__dict__.get(name)
                 if isinstance(desc, SchemaField):
                     return desc._make_selector()
-        raise AttributeError(
-            f"No field '{name}' on '{self._graphql_name}'"
-        )
+        raise AttributeError(f"No field '{name}' on '{self._graphql_name}'")
 
     def _resolve_target(self) -> type | None:
         if self._target_cls is None:
             return None
         if isinstance(self._target_cls, type):
             return self._target_cls
-        return self._target_cls()
+        return self._target_cls()  # type: ignore[no-any-return]
 
     # -- introspection ---------------------------------------------------------
 
@@ -216,6 +217,7 @@ class FieldSelector:
 # ---------------------------------------------------------------------------
 # SchemaField descriptor
 # ---------------------------------------------------------------------------
+
 
 class SchemaField:
     """Descriptor on generated schema classes.
@@ -262,6 +264,7 @@ class SchemaField:
 # BuiltQuery
 # ---------------------------------------------------------------------------
 
+
 class BuiltQuery:
     """A fully constructed query ready for execution by a client."""
 
@@ -278,7 +281,9 @@ class BuiltQuery:
     def to_graphql(self) -> str:
         """Convert to a GraphQL query string."""
         return build_query_string(
-            self.selections, self.aliases, self.operation_type,
+            self.selections,
+            self.aliases,
+            self.operation_type,
         )
 
     def __repr__(self) -> str:
@@ -288,6 +293,7 @@ class BuiltQuery:
 # ---------------------------------------------------------------------------
 # Query string generation
 # ---------------------------------------------------------------------------
+
 
 def build_query_string(
     selections: list[FieldSelector],

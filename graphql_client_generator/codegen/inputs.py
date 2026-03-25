@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from .._runtime.serialization import to_snake_case
-from ..parser import FieldInfo, InputInfo, SchemaInfo
+
+if TYPE_CHECKING:
+    from ..parser import FieldInfo, InputInfo, SchemaInfo
 
 
 def generate_inputs(schema: SchemaInfo) -> str:
@@ -57,9 +61,7 @@ def _generate_input(inp: InputInfo, enum_names: set[str]) -> list[str]:
         comment = f"  # {f.graphql_type}" if f.graphql_type else ""
         if f.description:
             lines.extend(_format_comment(f.description, 4))
-        lines.append(
-            f"    {py_name}: {py_type}{comment}"
-        )
+        lines.append(f"    {py_name}: {py_type}{comment}")
 
     for f in optional_fields:
         py_name = to_snake_case(f.name)
@@ -67,9 +69,7 @@ def _generate_input(inp: InputInfo, enum_names: set[str]) -> list[str]:
         comment = f"  # {f.graphql_type}" if f.graphql_type else ""
         if f.description:
             lines.extend(_format_comment(f.description, 4))
-        lines.append(
-            f"    {py_name}: {py_type} = None{comment}"
-        )
+        lines.append(f"    {py_name}: {py_type} = None{comment}")
 
     if not required_fields and not optional_fields:
         lines.append("    pass")
@@ -83,9 +83,11 @@ def _generate_input(inp: InputInfo, enum_names: set[str]) -> list[str]:
         lines.append(f"        _fields = [{field_names_str}]")
         lines.append("        _set = [f for f in _fields if getattr(self, f) is not None]")
         lines.append("        if len(_set) != 1:")
-        lines.append('            raise ValueError(')
-        lines.append(f'                f"Exactly one field must be set on @oneOf input '
-                     f'{inp.name}, got: {{_set or \'none\'}}"')
+        lines.append("            raise ValueError(")
+        lines.append(
+            f'                f"Exactly one field must be set on @oneOf input '
+            f"{inp.name}, got: {{_set or 'none'}}\""
+        )
         lines.append("            )")
     else:
         # Validate required fields are not None.
@@ -113,7 +115,7 @@ def _input_python_type(python_type: str) -> str:
 def _format_docstring(description: str, indent: int) -> list[str]:
     """Return a properly indented triple-quoted docstring for *description*."""
     pad = " " * indent
-    escaped = description.replace('"""', r'\"\"\"')
+    escaped = description.replace('"""', r"\"\"\"")
     raw = escaped.splitlines()
     if len(raw) == 1:
         return [f'{pad}"""{escaped}"""']
@@ -128,7 +130,4 @@ def _format_docstring(description: str, indent: int) -> list[str]:
 def _format_comment(description: str, indent: int) -> list[str]:
     """Return each line of *description* as a ``# `` comment."""
     pad = " " * indent
-    return [
-        f"{pad}# {line}" if line.strip() else f"{pad}#"
-        for line in description.splitlines()
-    ]
+    return [f"{pad}# {line}" if line.strip() else f"{pad}#" for line in description.splitlines()]

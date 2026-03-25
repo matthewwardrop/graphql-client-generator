@@ -25,10 +25,10 @@ from graphql_client_generator._runtime.model import (
     _unwrap_type_name,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers: model classes used across tests
 # ---------------------------------------------------------------------------
+
 
 class UserModel(GraphQLModel):
     __typename__ = "User"
@@ -63,8 +63,14 @@ def _make_client(auto_fetch=False):
     return client
 
 
-def _make_context(client=None, query="query { user { name } }", variables=None,
-                  operation_name=None, path=None, operation_type="query"):
+def _make_context(
+    client=None,
+    query="query { user { name } }",
+    variables=None,
+    operation_name=None,
+    path=None,
+    operation_type="query",
+):
     return QueryContext(
         client=client or _make_client(),
         query_string=query,
@@ -78,6 +84,7 @@ def _make_context(client=None, query="query { user { name } }", variables=None,
 # ===================================================================
 # FieldNotLoadedError
 # ===================================================================
+
 
 class TestFieldNotLoadedError:
     def test_is_attribute_error(self):
@@ -96,6 +103,7 @@ class TestFieldNotLoadedError:
 # PathSegment
 # ===================================================================
 
+
 class TestPathSegment:
     def test_basic_creation(self):
         seg = PathSegment(field_name="user", actual_name="user")
@@ -105,8 +113,7 @@ class TestPathSegment:
         assert seg.index is None
 
     def test_with_arguments_and_index(self):
-        seg = PathSegment(field_name="users", actual_name="users",
-                          arguments={"first": 10}, index=3)
+        seg = PathSegment(field_name="users", actual_name="users", arguments={"first": 10}, index=3)
         assert seg.arguments == {"first": 10}
         assert seg.index == 3
 
@@ -124,6 +131,7 @@ class TestPathSegment:
 # ===================================================================
 # QueryContext
 # ===================================================================
+
 
 class TestQueryContext:
     def test_defaults(self):
@@ -155,6 +163,7 @@ class TestQueryContext:
 # GraphQLModel
 # ===================================================================
 
+
 class TestGraphQLModel:
     def test_default_typename(self):
         assert GraphQLModel.__typename__ == ""
@@ -169,6 +178,7 @@ class TestGraphQLModel:
 # ===================================================================
 # GraphQLResponse.__init__
 # ===================================================================
+
 
 class TestGraphQLResponseInit:
     def test_simple_scalars(self):
@@ -246,6 +256,7 @@ class TestGraphQLResponseInit:
 # GraphQLResponse.__getattr__
 # ===================================================================
 
+
 class TestGraphQLResponseGetattr:
     def test_underscore_prefix_raises_attribute_error(self):
         resp = GraphQLResponse({}, UserModel)
@@ -310,6 +321,7 @@ class TestGraphQLResponseGetattr:
 # GraphQLResponse.to_dict / to_json
 # ===================================================================
 
+
 class TestGraphQLResponseSerialization:
     def test_to_dict_scalars(self):
         resp = GraphQLResponse({"name": "Alice", "age": 30}, UserModel)
@@ -343,6 +355,7 @@ class TestGraphQLResponseSerialization:
 # GraphQLResponse.__repr__
 # ===================================================================
 
+
 class TestGraphQLResponseRepr:
     def test_repr_empty(self):
         resp = GraphQLResponse({}, UserModel)
@@ -374,6 +387,7 @@ class TestGraphQLResponseRepr:
 # ===================================================================
 # GraphQLResponse.__eq__ / __hash__
 # ===================================================================
+
 
 class TestGraphQLResponseEquality:
     def test_equal_responses(self):
@@ -409,6 +423,7 @@ class TestGraphQLResponseEquality:
 # ===================================================================
 # _coerce_response_value
 # ===================================================================
+
 
 class TestCoerceResponseValue:
     def test_none_returns_none(self):
@@ -475,6 +490,7 @@ class TestCoerceResponseValue:
 # _child_context
 # ===================================================================
 
+
 class TestChildContext:
     def test_basic(self):
         parent = _make_context(path=[])
@@ -521,6 +537,7 @@ class TestChildContext:
 # _find_descriptor
 # ===================================================================
 
+
 class TestFindDescriptor:
     def test_returns_none_for_none_model(self):
         assert _find_descriptor(None, "name") is None
@@ -558,6 +575,7 @@ class TestFindDescriptor:
 # _resolve_subfields_for
 # ===================================================================
 
+
 class TestResolveSubfieldsFor:
     def test_scalar_type_returns_empty(self):
         desc = SchemaField("name", graphql_type="String")
@@ -593,6 +611,7 @@ class TestResolveSubfieldsFor:
 # _unwrap_type_name
 # ===================================================================
 
+
 class TestUnwrapTypeName:
     def test_simple(self):
         assert _unwrap_type_name("String") == "String"
@@ -616,6 +635,7 @@ class TestUnwrapTypeName:
 # ===================================================================
 # _serialize_value
 # ===================================================================
+
 
 class TestSerializeValue:
     def test_scalar(self):
@@ -673,6 +693,7 @@ class TestSerializeValue:
 # ===================================================================
 # _format_response / _repr_value
 # ===================================================================
+
 
 class TestFormatResponse:
     def test_empty(self):
@@ -748,6 +769,7 @@ class TestReprValue:
 # ===================================================================
 # _lazy_load_response_field
 # ===================================================================
+
 
 class TestLazyLoadResponseField:
     def test_no_context_raises(self):
@@ -972,6 +994,7 @@ class TestLazyLoadResponseField:
 # Integration-style: lazy load through __getattr__
 # ===================================================================
 
+
 class TestLazyLoadIntegration:
     @patch("graphql_client_generator._runtime.query.add_field_to_query")
     def test_getattr_triggers_lazy_load(self, mock_add_field):
@@ -993,6 +1016,7 @@ class TestLazyLoadIntegration:
 # Edge cases
 # ===================================================================
 
+
 class TestEdgeCases:
     def test_empty_response(self):
         resp = GraphQLResponse({}, None)
@@ -1001,13 +1025,7 @@ class TestEdgeCases:
         assert repr(resp) == "GraphQLResponse()"
 
     def test_deeply_nested(self):
-        data = {
-            "level1": {
-                "level2": {
-                    "level3": {"value": "deep"}
-                }
-            }
-        }
+        data = {"level1": {"level2": {"level3": {"value": "deep"}}}}
         resp = GraphQLResponse(data, None)
         assert resp.level1.level2.level3.value == "deep"
 

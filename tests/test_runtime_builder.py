@@ -10,20 +10,21 @@ from graphql_client_generator._runtime.builder import (
     SchemaField,
     Variable,
     VariableRef,
-    _VariableNamespace,
     _scalar_field_names,
     _to_literal,
+    _VariableNamespace,
     build_query_string,
     to_graphql,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test model classes with SchemaField descriptors
 # ---------------------------------------------------------------------------
 
+
 class Address:
     """Leaf type with only scalar fields."""
+
     street = SchemaField("street", "String!")
     city = SchemaField("city", "String!")
     zip_code = SchemaField("zipCode", "String")
@@ -31,6 +32,7 @@ class Address:
 
 class Post:
     """Composite type with scalar and composite fields."""
+
     id = SchemaField("id", "ID!")
     title = SchemaField("title", "String!")
     body = SchemaField("body", "String")
@@ -38,6 +40,7 @@ class Post:
 
 class User:
     """Composite type referencing other composites."""
+
     id = SchemaField("id", "ID!")
     name = SchemaField("name", "String!")
     email = SchemaField("email", "String")
@@ -47,16 +50,19 @@ class User:
 
 class UserChild(User):
     """Subclass to test MRO traversal."""
+
     age = SchemaField("age", "Int")
 
 
 class EmptyModel:
     """A model with no SchemaField descriptors at all."""
+
     pass
 
 
 class CompositeOnly:
     """A model with only composite (non-scalar) fields."""
+
     user = SchemaField("user", "User", target_cls=lambda: User)
 
 
@@ -67,6 +73,7 @@ _NON_CALLABLE_TARGET = User
 # ---------------------------------------------------------------------------
 # _VariableNamespace / Variable singleton
 # ---------------------------------------------------------------------------
+
 
 class TestVariableNamespace:
     def test_getattr_returns_variable_ref(self):
@@ -99,6 +106,7 @@ class TestVariableNamespace:
 # VariableRef
 # ---------------------------------------------------------------------------
 
+
 class TestVariableRef:
     def test_init_and_name(self):
         ref = VariableRef("x")
@@ -116,7 +124,7 @@ class TestVariableRef:
     def test_eq_non_variable_ref(self):
         assert VariableRef("a") != "a"
         assert VariableRef("a") != 42
-        assert VariableRef("a") != None
+        assert VariableRef("a") is not None
 
     def test_hash_same_name(self):
         assert hash(VariableRef("a")) == hash(VariableRef("a"))
@@ -134,6 +142,7 @@ class TestVariableRef:
 # FieldSelector
 # ---------------------------------------------------------------------------
 
+
 class TestFieldSelectorInit:
     def test_defaults(self):
         sel = FieldSelector("myField")
@@ -146,9 +155,12 @@ class TestFieldSelectorInit:
         assert sel._alias is None
 
     def test_with_all_args(self):
-        target_fn = lambda: User
+        def target_fn():
+            return User
+
         sel = FieldSelector(
-            "user", target_cls=target_fn,
+            "user",
+            target_cls=target_fn,
             arg_types={"id": "ID!"},
             arg_doc="Fetch user by ID",
         )
@@ -159,7 +171,9 @@ class TestFieldSelectorInit:
 
 class TestFieldSelectorClone:
     def test_clone_creates_independent_copy(self):
-        target_fn = lambda: User
+        def target_fn():
+            return User
+
         sel = FieldSelector("f", target_cls=target_fn, arg_types={"a": "Int"})
         sel._args = {"a": 1}
         sel._sub_selections = [FieldSelector("child")]
@@ -226,7 +240,8 @@ class TestFieldSelectorCall:
 
     def test_missing_multiple_required_args(self):
         sel = FieldSelector(
-            "create", arg_types={"a": "Int!", "b": "String!", "c": "Float"},
+            "create",
+            arg_types={"a": "Int!", "b": "String!", "c": "Float"},
         )
         with pytest.raises(TypeError, match="Missing required argument.*'create': a, b"):
             sel(c=1.0)
@@ -245,6 +260,7 @@ class TestFieldSelectorCall:
 class TestFieldSelectorSignature:
     def test_signature_set_when_arg_types(self):
         import inspect
+
         sel = FieldSelector("book", arg_types={"id": "ID!", "title": "String"})
         sig = inspect.signature(sel)
         params = list(sig.parameters.values())
@@ -450,6 +466,7 @@ class TestFieldSelectorRepr:
 # SchemaField descriptor
 # ---------------------------------------------------------------------------
 
+
 class TestSchemaField:
     def test_init_defaults(self):
         sf = SchemaField("fieldName")
@@ -462,8 +479,11 @@ class TestSchemaField:
 
     def test_init_all_params(self):
         sf = SchemaField(
-            "user", "User!", target_cls=lambda: User,
-            arg_types={"id": "ID!"}, doc="A user",
+            "user",
+            "User!",
+            target_cls=lambda: User,
+            arg_types={"id": "ID!"},
+            doc="A user",
         )
         assert sf.graphql_name == "user"
         assert sf.graphql_type == "User!"
@@ -499,7 +519,9 @@ class TestSchemaField:
         assert sel._arg_doc == "user doc"
 
     def test_make_selector(self):
-        target_fn = lambda: User
+        def target_fn():
+            return User
+
         sf = SchemaField("test", "String!", target_cls=target_fn, arg_types={"a": "Int"}, doc="d")
         sel = sf._make_selector()
         assert sel._graphql_name == "test"
@@ -527,6 +549,7 @@ class TestSchemaField:
 # ---------------------------------------------------------------------------
 # BuiltQuery
 # ---------------------------------------------------------------------------
+
 
 class TestBuiltQuery:
     def test_to_graphql_simple(self):
@@ -567,6 +590,7 @@ class TestBuiltQuery:
 # ---------------------------------------------------------------------------
 # build_query_string
 # ---------------------------------------------------------------------------
+
 
 class TestBuildQueryString:
     def test_single_scalar_field(self):
@@ -623,6 +647,7 @@ class TestBuildQueryString:
 # ---------------------------------------------------------------------------
 # to_graphql (single field)
 # ---------------------------------------------------------------------------
+
 
 class TestToGraphql:
     def test_simple_field(self):
@@ -694,14 +719,14 @@ class TestToGraphql:
         sel = FieldSelector("user", arg_types={"id": "ID!"})
         sel_with_args = sel(id=Variable.x)
         result = to_graphql(sel_with_args)
-        assert "user(id: $x)" == result
+        assert result == "user(id: $x)"
 
     def test_nested_sub_selections(self):
         inner = FieldSelector("street")
         addr = FieldSelector("address", target_cls=lambda: Address)[inner]
         parent = FieldSelector("user", target_cls=lambda: User)[addr]
         result = to_graphql(parent)
-        assert "user { __typename address { __typename street } }" == result
+        assert result == "user { __typename address { __typename street } }"
 
     def test_auto_expand_no_scalars(self):
         """Composite with only composite children should not auto-expand."""
@@ -713,7 +738,8 @@ class TestToGraphql:
 
     def test_auto_expand_with_args(self):
         sel = FieldSelector(
-            "address", target_cls=lambda: Address,
+            "address",
+            target_cls=lambda: Address,
             arg_types={"format": "String"},
         )
         result = to_graphql(sel(format="short"))
@@ -727,7 +753,7 @@ class TestToGraphql:
     def test_multiple_literal_args(self):
         sel = FieldSelector("users", arg_types={"first": "Int", "after": "String"})
         result = to_graphql(sel(first=10, after="abc"))
-        assert 'first: 10' in result
+        assert "first: 10" in result
         assert 'after: "abc"' in result
 
     def test_sub_selections_with_alias(self):
@@ -740,6 +766,7 @@ class TestToGraphql:
 # ---------------------------------------------------------------------------
 # _scalar_field_names
 # ---------------------------------------------------------------------------
+
 
 class TestScalarFieldNames:
     def test_simple_class(self):
@@ -773,6 +800,7 @@ class TestScalarFieldNames:
 # ---------------------------------------------------------------------------
 # _to_literal
 # ---------------------------------------------------------------------------
+
 
 class TestToLiteral:
     def test_string(self):
@@ -873,11 +901,14 @@ class TestToLiteral:
 # Integration / end-to-end tests
 # ---------------------------------------------------------------------------
 
+
 class TestIntegration:
     def test_full_query_with_chaining(self):
         """Build a query using the descriptor-based API end to end."""
         user_sel = FieldSelector(
-            "user", target_cls=lambda: User, arg_types={"id": "ID!"},
+            "user",
+            target_cls=lambda: User,
+            arg_types={"id": "ID!"},
         )
         q = user_sel(id=Variable.userId)[
             FieldSelector("name"),
@@ -900,7 +931,7 @@ class TestIntegration:
         """Accessing SchemaField on a class and auto-expanding."""
         sel = User.address
         result = to_graphql(sel)
-        assert "address { __typename street city zipCode }" == result
+        assert result == "address { __typename street city zipCode }"
 
     def test_deeply_nested_query(self):
         user_sel = FieldSelector("user", target_cls=lambda: User)
@@ -911,7 +942,7 @@ class TestIntegration:
             posts,
         ]
         result = to_graphql(q)
-        assert "user { __typename name posts { __typename title } }" == result
+        assert result == "user { __typename name posts { __typename title } }"
 
     def test_alias_on_field_selector_in_graphql(self):
         sel = FieldSelector("name").as_("firstName")
@@ -921,7 +952,9 @@ class TestIntegration:
     def test_sub_selection_with_variable_args(self):
         var_refs: dict[str, str] = {}
         child = FieldSelector(
-            "posts", target_cls=lambda: Post, arg_types={"first": "Int"},
+            "posts",
+            target_cls=lambda: Post,
+            arg_types={"first": "Int"},
         )
         child_with_args = child(first=Variable.count)
         parent = FieldSelector("user", target_cls=lambda: User)[child_with_args]

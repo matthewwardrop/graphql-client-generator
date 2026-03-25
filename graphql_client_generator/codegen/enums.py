@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from ..parser import SchemaInfo
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..parser import SchemaInfo
 
 
 def generate_enums(schema: SchemaInfo) -> str:
@@ -34,7 +37,7 @@ def generate_enums(schema: SchemaInfo) -> str:
 def _format_docstring(description: str, indent: int) -> list[str]:
     """Return a properly indented triple-quoted docstring for *description*."""
     pad = " " * indent
-    escaped = description.replace('"""', r'\"\"\"')
+    escaped = description.replace('"""', r"\"\"\"")
     raw = escaped.splitlines()
     if len(raw) == 1:
         return [f'{pad}"""{escaped}"""']

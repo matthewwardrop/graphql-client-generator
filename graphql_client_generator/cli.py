@@ -19,12 +19,14 @@ def main(argv: list[str] | None = None) -> None:
         help="Path to a .graphqls schema file, or an http(s):// URL to fetch via introspection.",
     )
     parser.add_argument(
-        "-n", "--name",
+        "-n",
+        "--name",
         help="Package name for the generated client (default: schema filename stem or 'client').",
         default=None,
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         help="Output directory (default: current working directory).",
         default=".",
     )
@@ -37,7 +39,8 @@ def main(argv: list[str] | None = None) -> None:
         ),
     )
     parser.add_argument(
-        "-H", "--header",
+        "-H",
+        "--header",
         action="append",
         dest="headers",
         metavar="NAME:VALUE",
@@ -59,15 +62,21 @@ def main(argv: list[str] | None = None) -> None:
             headers = _parse_headers(args.headers)
             package_name = args.name or "client"
             result_path = generate_from_endpoint(
-                args.schema, package_name, output_dir,
-                headers=headers or None, as_package=not args.module,
+                args.schema,
+                package_name,
+                output_dir,
+                headers=headers or None,
+                as_package=not args.module,
             )
         else:
             # Local file.
             schema_path = Path(args.schema)
             package_name = args.name or schema_path.stem
             result_path = generate_from_file(
-                schema_path, package_name, output_dir, as_package=not args.module,
+                schema_path,
+                package_name,
+                output_dir,
+                as_package=not args.module,
             )
     except (RuntimeError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)

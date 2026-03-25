@@ -2,24 +2,20 @@
 
 from __future__ import annotations
 
-import pytest
-
 from graphql_client_generator.codegen.client import generate_client
 from graphql_client_generator.codegen.enums import generate_enums
 from graphql_client_generator.codegen.inputs import generate_inputs
 from graphql_client_generator.codegen.outputs import generate_outputs
-from graphql_client_generator.codegen.schema import generate_schema
 from graphql_client_generator.codegen.package import generate_init, generate_pyproject
+from graphql_client_generator.codegen.schema import generate_schema
 from graphql_client_generator.parser import (
     EnumInfo,
     FieldInfo,
     InputInfo,
-    InterfaceInfo,
     SchemaInfo,
     TypeInfo,
     UnionInfo,
 )
-
 
 # ---------------------------------------------------------------------------
 # generate_enums
@@ -56,9 +52,7 @@ class TestGenerateEnums:
         assert '"""A color enum"""' in code
 
     def test_enum_with_empty_values(self):
-        schema = SchemaInfo(
-            enums=[EnumInfo(name="Empty", values=[], description="")]
-        )
+        schema = SchemaInfo(enums=[EnumInfo(name="Empty", values=[], description="")])
         code = generate_enums(schema)
         assert "class Empty(Enum):" in code
         assert "    pass" in code
@@ -68,7 +62,7 @@ class TestGenerateEnums:
             enums=[EnumInfo(name="Tricky", values=["A"], description='Has """triple quotes"""')]
         )
         code = generate_enums(schema)
-        assert r'\"\"\"' in code
+        assert r"\"\"\"" in code
 
 
 # ---------------------------------------------------------------------------
@@ -120,58 +114,82 @@ class TestGenerateInputs:
 
     def test_input_with_description(self):
         schema = SchemaInfo(
-            inputs=[InputInfo(
-                name="TestInput",
-                fields=[FieldInfo(name="x", graphql_type="String!", python_type="str", is_non_null=True)],
-                description="A test input",
-            )]
+            inputs=[
+                InputInfo(
+                    name="TestInput",
+                    fields=[
+                        FieldInfo(
+                            name="x", graphql_type="String!", python_type="str", is_non_null=True
+                        )
+                    ],
+                    description="A test input",
+                )
+            ]
         )
         code = generate_inputs(schema)
         assert '"""A test input"""' in code
 
     def test_input_field_with_description(self):
         schema = SchemaInfo(
-            inputs=[InputInfo(
-                name="TestInput",
-                fields=[FieldInfo(
-                    name="x", graphql_type="String!", python_type="str",
-                    is_non_null=True, description="The X field",
-                )],
-            )]
+            inputs=[
+                InputInfo(
+                    name="TestInput",
+                    fields=[
+                        FieldInfo(
+                            name="x",
+                            graphql_type="String!",
+                            python_type="str",
+                            is_non_null=True,
+                            description="The X field",
+                        )
+                    ],
+                )
+            ]
         )
         code = generate_inputs(schema)
         assert "# The X field" in code
 
     def test_input_optional_field_with_description(self):
         schema = SchemaInfo(
-            inputs=[InputInfo(
-                name="TestInput",
-                fields=[FieldInfo(
-                    name="y", graphql_type="String", python_type="str | None",
-                    is_non_null=False, description="Optional Y",
-                )],
-            )]
+            inputs=[
+                InputInfo(
+                    name="TestInput",
+                    fields=[
+                        FieldInfo(
+                            name="y",
+                            graphql_type="String",
+                            python_type="str | None",
+                            is_non_null=False,
+                            description="Optional Y",
+                        )
+                    ],
+                )
+            ]
         )
         code = generate_inputs(schema)
         assert "# Optional Y" in code
 
     def test_input_with_no_fields(self):
-        schema = SchemaInfo(
-            inputs=[InputInfo(name="EmptyInput", fields=[])]
-        )
+        schema = SchemaInfo(inputs=[InputInfo(name="EmptyInput", fields=[])])
         code = generate_inputs(schema)
         assert "class EmptyInput:" in code
         assert "    pass" in code
 
     def test_input_all_optional_post_init(self):
         schema = SchemaInfo(
-            inputs=[InputInfo(
-                name="OptInput",
-                fields=[FieldInfo(
-                    name="x", graphql_type="String", python_type="str | None",
-                    is_non_null=False,
-                )],
-            )]
+            inputs=[
+                InputInfo(
+                    name="OptInput",
+                    fields=[
+                        FieldInfo(
+                            name="x",
+                            graphql_type="String",
+                            python_type="str | None",
+                            is_non_null=False,
+                        )
+                    ],
+                )
+            ]
         )
         code = generate_inputs(schema)
         # post_init with no required fields should have "pass"
@@ -179,14 +197,20 @@ class TestGenerateInputs:
 
     def test_input_escape_docstring(self):
         schema = SchemaInfo(
-            inputs=[InputInfo(
-                name="TestInput",
-                fields=[FieldInfo(name="x", graphql_type="String!", python_type="str", is_non_null=True)],
-                description='Has """triple"""',
-            )]
+            inputs=[
+                InputInfo(
+                    name="TestInput",
+                    fields=[
+                        FieldInfo(
+                            name="x", graphql_type="String!", python_type="str", is_non_null=True
+                        )
+                    ],
+                    description='Has """triple"""',
+                )
+            ]
         )
         code = generate_inputs(schema)
-        assert r'\"\"\"' in code
+        assert r"\"\"\"" in code
 
 
 # ---------------------------------------------------------------------------
@@ -240,8 +264,14 @@ class TestGenerateOutputs:
         schema = SchemaInfo(
             unions=[UnionInfo(name="MyUnion", member_types=["A", "B"], description="A union")],
             types=[
-                TypeInfo(name="A", fields=[FieldInfo(name="x", graphql_type="String", python_type="str | None")]),
-                TypeInfo(name="B", fields=[FieldInfo(name="y", graphql_type="Int", python_type="int | None")]),
+                TypeInfo(
+                    name="A",
+                    fields=[FieldInfo(name="x", graphql_type="String", python_type="str | None")],
+                ),
+                TypeInfo(
+                    name="B",
+                    fields=[FieldInfo(name="y", graphql_type="Int", python_type="int | None")],
+                ),
             ],
             query_type=TypeInfo(name="Query", fields=[]),
         )
@@ -271,11 +301,16 @@ class TestGenerateOutputs:
             query_type=TypeInfo(name="Query", fields=[]),
         )
         code = generate_outputs(schema)
-        assert r'\"\"\"' in code
+        assert r"\"\"\"" in code
 
     def test_no_query_no_mutation_no_result_classes(self):
         schema = SchemaInfo(
-            types=[TypeInfo(name="Foo", fields=[FieldInfo(name="x", graphql_type="String", python_type="str | None")])],
+            types=[
+                TypeInfo(
+                    name="Foo",
+                    fields=[FieldInfo(name="x", graphql_type="String", python_type="str | None")],
+                )
+            ],
         )
         code = generate_outputs(schema)
         assert "QueryResult" not in code
@@ -283,15 +318,23 @@ class TestGenerateOutputs:
 
     def test_model_field_with_arguments(self):
         from graphql_client_generator.parser import FieldArgInfo
+
         schema = SchemaInfo(
-            types=[TypeInfo(name="Foo", fields=[
-                FieldInfo(
-                    name="items",
-                    graphql_type="[String!]!",
-                    python_type="list[str]",
-                    arguments=[FieldArgInfo(name="limit", graphql_type="Int!", python_type="int")],
+            types=[
+                TypeInfo(
+                    name="Foo",
+                    fields=[
+                        FieldInfo(
+                            name="items",
+                            graphql_type="[String!]!",
+                            python_type="list[str]",
+                            arguments=[
+                                FieldArgInfo(name="limit", graphql_type="Int!", python_type="int")
+                            ],
+                        )
+                    ],
                 )
-            ])],
+            ],
         )
         code = generate_outputs(schema)
         assert 'arg_types={"limit": "Int!"}' in code
@@ -393,36 +436,26 @@ class TestGenerateClient:
 
 class TestGenerateInit:
     def test_imports_client(self, minimal_schema: SchemaInfo):
-        code = generate_init(
-            minimal_schema, "my_package", "MyClient", "MySchema"
-        )
+        code = generate_init(minimal_schema, "my_package", "MyClient", "MySchema")
         assert "from .client import MyClient" in code
 
     def test_imports_schema_class(self, minimal_schema: SchemaInfo):
-        code = generate_init(
-            minimal_schema, "my_package", "MyClient", "MySchema"
-        )
+        code = generate_init(minimal_schema, "my_package", "MyClient", "MySchema")
         assert "from .schema import MySchema" in code
 
     def test_imports_modules(self, minimal_schema: SchemaInfo):
-        code = generate_init(
-            minimal_schema, "my_package", "MyClient", "MySchema"
-        )
+        code = generate_init(minimal_schema, "my_package", "MyClient", "MySchema")
         assert "from . import outputs" in code
         assert "from . import schema" in code
         assert "from . import enums" in code
         assert "from . import inputs" in code
 
     def test_imports_variable(self, minimal_schema: SchemaInfo):
-        code = generate_init(
-            minimal_schema, "my_package", "MyClient", "MySchema"
-        )
+        code = generate_init(minimal_schema, "my_package", "MyClient", "MySchema")
         assert "from ._runtime.builder import Variable" in code
 
     def test_all_list(self, minimal_schema: SchemaInfo):
-        code = generate_init(
-            minimal_schema, "my_package", "MyClient", "MySchema"
-        )
+        code = generate_init(minimal_schema, "my_package", "MyClient", "MySchema")
         assert "__all__" in code
         assert "'MyClient'" in code
         assert "'MySchema'" in code
@@ -432,23 +465,22 @@ class TestGenerateInit:
         assert "'inputs'" in code
 
     def test_docstring_includes_package_name(self, minimal_schema: SchemaInfo):
-        code = generate_init(
-            minimal_schema, "my_package", "MyClient", "MySchema"
-        )
+        code = generate_init(minimal_schema, "my_package", "MyClient", "MySchema")
         assert "my_package" in code
 
     def test_regen_command_included(self, minimal_schema: SchemaInfo):
         code = generate_init(
-            minimal_schema, "my_package", "MyClient", "MySchema",
+            minimal_schema,
+            "my_package",
+            "MyClient",
+            "MySchema",
             regen_command="python -m graphql_client_generator schema.graphqls -n my_package",
         )
         assert "To regenerate:" in code
         assert "python -m graphql_client_generator schema.graphqls -n my_package" in code
 
     def test_regen_command_omitted_when_empty(self, minimal_schema: SchemaInfo):
-        code = generate_init(
-            minimal_schema, "my_package", "MyClient", "MySchema"
-        )
+        code = generate_init(minimal_schema, "my_package", "MyClient", "MySchema")
         assert "To regenerate:" not in code
 
 
@@ -514,14 +546,22 @@ MULTILINE_CLASS_DESC = "Short summary.\nLonger explanation here.\nFinal note."
 
 class TestMultilineDescriptions:
     def _make_input_schema(self, field_desc: str = "", class_desc: str = "") -> SchemaInfo:
-        return SchemaInfo(inputs=[InputInfo(
-            name="MyInput",
-            description=class_desc,
-            fields=[FieldInfo(
-                name="id", graphql_type="Int", python_type="int | None",
-                description=field_desc,
-            )],
-        )])
+        return SchemaInfo(
+            inputs=[
+                InputInfo(
+                    name="MyInput",
+                    description=class_desc,
+                    fields=[
+                        FieldInfo(
+                            name="id",
+                            graphql_type="Int",
+                            python_type="int | None",
+                            description=field_desc,
+                        )
+                    ],
+                )
+            ]
+        )
 
     def test_multiline_field_comment_all_lines_prefixed(self):
         schema = self._make_input_schema(field_desc=MULTILINE_DESC)
@@ -546,9 +586,9 @@ class TestMultilineDescriptions:
         compile(code, "<generated>", "exec")
 
     def test_multiline_enum_docstring(self):
-        schema = SchemaInfo(enums=[
-            EnumInfo(name="Color", values=["RED"], description=MULTILINE_CLASS_DESC)
-        ])
+        schema = SchemaInfo(
+            enums=[EnumInfo(name="Color", values=["RED"], description=MULTILINE_CLASS_DESC)]
+        )
         code = generate_enums(schema)
         assert "    Short summary." in code
         assert "    Longer explanation here." in code

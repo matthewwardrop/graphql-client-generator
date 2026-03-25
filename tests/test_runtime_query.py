@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-
 from graphql_client_generator._runtime.model import PathSegment
 from graphql_client_generator._runtime.query import (
     add_field_to_query,
     ensure_typenames,
 )
-
 
 # ---------------------------------------------------------------------------
 # ensure_typenames
@@ -90,9 +87,7 @@ class TestAddFieldToQuery:
     def test_add_composite_field_with_sub_fields(self):
         query = "{ user { name } }"
         path = [PathSegment(field_name="user", actual_name="user")]
-        result = add_field_to_query(
-            query, path, "posts", sub_fields=["title", "body"]
-        )
+        result = add_field_to_query(query, path, "posts", sub_fields=["title", "body"])
         assert "posts" in result
         assert "title" in result
         assert "body" in result
@@ -132,9 +127,7 @@ class TestAddFieldToQuery:
     def test_add_composite_includes_typename(self):
         query = "{ user { name } }"
         path = [PathSegment(field_name="user", actual_name="user")]
-        result = add_field_to_query(
-            query, path, "address", sub_fields=["street", "city"]
-        )
+        result = add_field_to_query(query, path, "address", sub_fields=["street", "city"])
         assert "address" in result
         # The composite field should include __typename
         assert "__typename" in result
