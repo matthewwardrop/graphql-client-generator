@@ -8,8 +8,6 @@ from typing import Any, TypeVar
 
 T = TypeVar("T", bound="GraphQLModel")
 
-_SENTINEL = object()
-
 
 class FieldNotLoadedError(AttributeError):
     """Raised when accessing a field that was not included in the query."""
@@ -38,18 +36,11 @@ class QueryContext:
 
 
 class graphql_field:
-    """Descriptor that provides typed access to GraphQL response data.
+    """Descriptor on generated model classes defining a schema field.
 
-    Usage in generated code::
-
-        class Test(GraphQLModel):
-            id: int = graphql_field("id", graphql_type="Int!")
-
-    Behaviour:
-    - If the field was populated in the query response, returns the coerced value.
-    - If not populated and *auto_fetch* is enabled on the client, triggers a
-      lazy fetch and caches the result.
-    - Otherwise raises ``FieldNotLoadedError``.
+    These descriptors are used as *metadata* by :class:`GraphQLResponse`
+    for lazy loading and sub-field resolution.  They are not accessed
+    directly on response instances.
     """
 
     def __init__(self, graphql_name: str, graphql_type: str = "") -> None:
@@ -57,211 +48,234 @@ class graphql_field:
         self.graphql_type = graphql_type
         self.attr_name: str | None = None
 
-    # -- descriptor protocol ---------------------------------------------------
-
     def __set_name__(self, owner: type, name: str) -> None:
         self.attr_name = name
 
     def __get__(self, obj: GraphQLModel | None, objtype: type | None = None) -> Any:
         if obj is None:
-            return self  # class-level access returns the descriptor itself
-
-        # Fast path: value already resolved and cached in instance dict.
-        cached = obj.__dict__.get(self.attr_name, _SENTINEL)
-        if cached is not _SENTINEL:
-            return cached
-
-        # Check raw response data.
-        raw = obj._data.get(self.graphql_name, _SENTINEL)
-        if raw is not _SENTINEL:
-            value = obj._coerce_value(self.attr_name, self.graphql_name, raw)
-            obj.__dict__[self.attr_name] = value
-            return value
-
-        # Not in data -- try lazy loading.
-        ctx = obj._context
-        if ctx is not None and ctx.client is not None and ctx.client.auto_fetch:
-            value = obj._lazy_load_field(self.graphql_name, self.attr_name)
-            obj.__dict__[self.attr_name] = value
-            return value
-
+            return self
         raise FieldNotLoadedError(
-            f"Field '{self.attr_name}' (GraphQL: '{self.graphql_name}') was not "
-            f"included in the query and auto_fetch is disabled"
+            "graphql_field descriptors should not be accessed on model instances; "
+            "use GraphQLResponse for response data"
         )
-
-    def __set__(self, obj: GraphQLModel, value: Any) -> None:
-        obj.__dict__[self.attr_name] = value
 
     def __repr__(self) -> str:
         return f"graphql_field({self.graphql_name!r}, graphql_type={self.graphql_type!r})"
 
 
 class GraphQLModel:
-    """Base class for all generated GraphQL result types.
+    """Base class for generated GraphQL schema types.
 
-    Subclasses declare fields via :class:`graphql_field` descriptors and set
-    ``__typename__`` to the corresponding GraphQL type name.
+    Subclasses declare fields via :class:`graphql_field` descriptors.
+    These classes serve as schema metadata; response data is wrapped
+    in :class:`GraphQLResponse` instead.
     """
 
     __typename__: str = ""
+    __type_registry__: dict[str, type[GraphQLModel]] = {}
 
-    # Populated by generated code: maps GraphQL field name -> (python_attr, type_info)
-    __field_map__: dict[str, str] = {}  # graphql_name -> attr_name
-    __type_registry__: dict[str, type[GraphQLModel]] = {}  # typename -> class
 
-    def __init__(self, _data: dict[str, Any], _context: QueryContext | None = None) -> None:
-        self._data = _data
-        self._context = _context
+# ---------------------------------------------------------------------------
+# GraphQLResponse -- dynamic wrapper for response data
+# ---------------------------------------------------------------------------
 
-    # -- coercion --------------------------------------------------------------
+class GraphQLResponse:
+    """Dynamic wrapper around a GraphQL response object.
 
-    def _coerce_value(self, attr_name: str, graphql_name: str, raw: Any) -> Any:
-        """Coerce a raw JSON value into the appropriate Python type.
+    Attributes come directly from the response data (including aliases).
+    The associated *model_cls* is used only for type resolution, repr,
+    and lazy loading of unqueried fields.
+    """
 
-        The base implementation handles:
-        - None (pass through)
-        - dicts with ``__typename`` -> look up concrete model class
-        - lists -> recurse
-        - scalars -> pass through
+    def __init__(
+        self,
+        data: dict[str, Any],
+        model_cls: type[GraphQLModel] | None,
+        context: QueryContext | None = None,
+        type_registry: dict[str, type[GraphQLModel]] | None = None,
+    ) -> None:
+        self.__dict__["_data"] = data
+        self.__dict__["_model_cls"] = model_cls
+        self.__dict__["_context"] = context
+        self.__dict__["_type_registry"] = type_registry or {}
 
-        Generated subclasses may override for tighter typing.
-        """
-        if raw is None:
-            return None
-        if isinstance(raw, dict):
-            return self._coerce_object(raw)
-        if isinstance(raw, list):
-            return [self._coerce_value(attr_name, graphql_name, item) for item in raw]
-        return raw
+        # Eagerly coerce all response fields into attributes.
+        for key, raw in data.items():
+            if key != "__typename":
+                self.__dict__[key] = _coerce_response_value(
+                    raw, self._type_registry, context, key,
+                )
 
-    def _coerce_object(self, data: dict[str, Any]) -> GraphQLModel:
-        """Turn a raw dict into the right ``GraphQLModel`` subclass."""
-        typename = data.get("__typename")
-        cls = self.__type_registry__.get(typename) if typename else None
-        if cls is None:
-            # Fallback: return a generic GraphQLModel
-            cls = GraphQLModel
-        child_context = None
-        if self._context is not None:
-            child_context = QueryContext(
-                client=self._context.client,
-                query_string=self._context.query_string,
-                variables=self._context.variables,
-                operation_name=self._context.operation_name,
-                path=list(self._context.path),  # will be extended by caller if needed
-                operation_type=self._context.operation_type,
-            )
-        return cls(data, child_context)
-
-    # -- lazy loading ----------------------------------------------------------
-
-    def _lazy_load_field(self, graphql_name: str, attr_name: str) -> Any:
-        """Fetch a missing field by modifying the original query and re-executing."""
-        from .query import add_field_to_query
-
-        ctx = self._context
-        if ctx is None or ctx.client is None:
-            raise FieldNotLoadedError(
-                f"Cannot lazy-load '{attr_name}': no client context available"
-            )
-
-        sub_fields = self._resolve_subfields(graphql_name)
-
-        new_query = add_field_to_query(
-            ctx.query_string,
-            ctx.path,
-            graphql_name,
-            sub_fields,
+    def __getattr__(self, name: str) -> Any:
+        # Field not in response data -> try lazy loading via model_cls.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        desc = _find_descriptor(self._model_cls, name)
+        if desc is not None:
+            ctx = self._context
+            if ctx is not None and ctx.client is not None and ctx.client.auto_fetch:
+                value = _lazy_load_response_field(self, desc)
+                self.__dict__[name] = value
+                return value
+        raise FieldNotLoadedError(
+            f"Field '{name}' was not included in the query"
         )
-
-        response_data = ctx.client._execute_raw(
-            new_query,
-            variables=ctx.variables,
-            operation_name=ctx.operation_name,
-        )
-
-        # Walk the response along our path to find the relevant sub-object.
-        current = response_data
-        for segment in ctx.path:
-            if current is None:
-                break
-            if isinstance(current, dict):
-                current = current.get(segment.field_name)
-            if segment.index is not None and isinstance(current, list):
-                current = current[segment.index] if segment.index < len(current) else None
-
-        if current is None or not isinstance(current, dict):
-            return None
-
-        raw_value = current.get(graphql_name)
-        # Cache in _data so the next descriptor access hits the fast path.
-        self._data[graphql_name] = raw_value
-        return self._coerce_value(attr_name, graphql_name, raw_value)
-
-    def _resolve_subfields(self, graphql_name: str) -> list[str]:
-        """Resolve the target type of *graphql_name* and return its scalar
-        sub-field names. Returns ``[]`` if the field is a scalar type."""
-        # Find the descriptor for this field on the current class.
-        for klass in type(self).__mro__:
-            for val in klass.__dict__.values():
-                if isinstance(val, graphql_field) and val.graphql_name == graphql_name:
-                    target_type = _unwrap_type_name(val.graphql_type)
-                    target_cls = self.__type_registry__.get(target_type)
-                    if target_cls is None:
-                        return []  # scalar type, no sub-selection needed
-                    # Collect scalar field names from the target class.
-                    result: list[str] = []
-                    for tc in target_cls.__mro__:
-                        for tv in tc.__dict__.values():
-                            if isinstance(tv, graphql_field):
-                                inner = _unwrap_type_name(tv.graphql_type)
-                                if self.__type_registry__.get(inner) is None:
-                                    result.append(tv.graphql_name)
-                    return result
-        return []
 
     # -- serialization ---------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize loaded fields to a plain dict (camelCase keys)."""
-        result: dict[str, Any] = {}
-        for graphql_name, raw in self._data.items():
-            result[graphql_name] = _serialize_value(raw)
-        return result
+        """Serialize loaded fields to a plain dict."""
+        return {k: _serialize_value(v) for k, v in self._data.items()}
 
     def to_json(self, **kwargs: Any) -> str:
         """Serialize loaded fields to a JSON string."""
         return json.dumps(self.to_dict(), **kwargs)
 
-    @classmethod
-    def from_dict(cls: type[T], data: dict[str, Any]) -> T:
-        """Construct a model from a plain dict (no client context)."""
-        return cls(data)
-
-    @classmethod
-    def from_json(cls: type[T], json_str: str) -> T:
-        """Construct a model from a JSON string (no client context)."""
-        return cls(json.loads(json_str))
-
-    @classmethod
-    def _from_response(cls: type[T], data: dict[str, Any], context: QueryContext) -> T:
-        """Construct a model from a server response dict with client context."""
-        return cls(data, context)
-
     # -- dunder ----------------------------------------------------------------
 
     def __repr__(self) -> str:
-        return _format_model(self, indent=0)
+        return _format_response(self, indent=0)
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, GraphQLModel):
+        if not isinstance(other, GraphQLResponse):
             return NotImplemented
-        return type(self) is type(other) and self._data == other._data
+        return self._model_cls is other._model_cls and self._data == other._data
 
     def __hash__(self) -> int:
         return id(self)
 
+
+# ---------------------------------------------------------------------------
+# Response coercion helpers
+# ---------------------------------------------------------------------------
+
+def _coerce_response_value(
+    raw: Any,
+    type_registry: dict[str, type[GraphQLModel]],
+    context: QueryContext | None,
+    key: str,
+) -> Any:
+    """Coerce a raw JSON value into a ``GraphQLResponse`` or scalar."""
+    if raw is None:
+        return None
+    if isinstance(raw, dict):
+        typename = raw.get("__typename")
+        model_cls = type_registry.get(typename) if typename else None
+        child_context = _child_context(context, key) if context else None
+        return GraphQLResponse(raw, model_cls, child_context, type_registry)
+    if isinstance(raw, list):
+        return [
+            _coerce_response_value(item, type_registry, context, key)
+            for item in raw
+        ]
+    return raw
+
+
+def _child_context(
+    parent_ctx: QueryContext,
+    key: str,
+    index: int | None = None,
+) -> QueryContext:
+    """Build a child ``QueryContext`` one level deeper."""
+    child_path = list(parent_ctx.path) + [
+        PathSegment(field_name=key, actual_name=key, index=index)
+    ]
+    return QueryContext(
+        client=parent_ctx.client,
+        query_string=parent_ctx.query_string,
+        variables=parent_ctx.variables,
+        operation_name=parent_ctx.operation_name,
+        path=child_path,
+        operation_type=parent_ctx.operation_type,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Lazy loading helpers (for GraphQLResponse)
+# ---------------------------------------------------------------------------
+
+def _find_descriptor(
+    model_cls: type[GraphQLModel] | None,
+    attr_name: str,
+) -> graphql_field | None:
+    """Find a ``graphql_field`` descriptor on *model_cls* matching *attr_name*."""
+    if model_cls is None:
+        return None
+    for klass in model_cls.__mro__:
+        desc = klass.__dict__.get(attr_name)
+        if isinstance(desc, graphql_field):
+            return desc
+    return None
+
+
+def _resolve_subfields_for(
+    desc: graphql_field,
+    type_registry: dict[str, type[GraphQLModel]],
+) -> list[str]:
+    """Resolve scalar sub-field names for the target type of *desc*."""
+    target_type = _unwrap_type_name(desc.graphql_type)
+    target_cls = type_registry.get(target_type)
+    if target_cls is None:
+        return []  # scalar type
+    result: list[str] = []
+    for klass in target_cls.__mro__:
+        for val in klass.__dict__.values():
+            if isinstance(val, graphql_field):
+                inner = _unwrap_type_name(val.graphql_type)
+                if type_registry.get(inner) is None:
+                    result.append(val.graphql_name)
+    return result
+
+
+def _lazy_load_response_field(
+    obj: GraphQLResponse,
+    desc: graphql_field,
+) -> Any:
+    """Lazy-load a field on a ``GraphQLResponse`` using descriptor metadata."""
+    from .query import add_field_to_query
+
+    ctx = obj._context
+    if ctx is None or ctx.client is None:
+        raise FieldNotLoadedError(
+            f"Cannot lazy-load '{desc.attr_name}': no client context available"
+        )
+
+    sub_fields = _resolve_subfields_for(desc, obj._type_registry)
+
+    new_query = add_field_to_query(
+        ctx.query_string,
+        ctx.path,
+        desc.graphql_name,
+        sub_fields,
+    )
+
+    response_data = ctx.client._execute_raw(
+        new_query,
+        variables=ctx.variables,
+        operation_name=ctx.operation_name,
+    )
+
+    # Walk the response along our path to find the relevant sub-object.
+    current: Any = response_data
+    for segment in ctx.path:
+        if current is None:
+            break
+        if isinstance(current, dict):
+            current = current.get(segment.field_name)
+        if segment.index is not None and isinstance(current, list):
+            current = current[segment.index] if segment.index < len(current) else None
+
+    if current is None or not isinstance(current, dict):
+        return None
+
+    raw_value = current.get(desc.graphql_name)
+    obj._data[desc.graphql_name] = raw_value
+    return _coerce_response_value(raw_value, obj._type_registry, ctx, desc.graphql_name)
+
+
+# ---------------------------------------------------------------------------
+# Utility helpers
+# ---------------------------------------------------------------------------
 
 def _unwrap_type_name(graphql_type: str) -> str:
     """Extract the base type name from a GraphQL type string like ``[Foo!]!``."""
@@ -270,8 +284,10 @@ def _unwrap_type_name(graphql_type: str) -> str:
 
 def _serialize_value(value: Any) -> Any:
     """Recursively serialize a value for to_dict()."""
-    if isinstance(value, GraphQLModel):
+    if isinstance(value, GraphQLResponse):
         return value.to_dict()
+    if isinstance(value, GraphQLModel):
+        return {k: _serialize_value(v) for k, v in value.__dict__.items() if not k.startswith("_")}
     if isinstance(value, list):
         return [_serialize_value(v) for v in value]
     if isinstance(value, dict):
@@ -281,20 +297,20 @@ def _serialize_value(value: Any) -> Any:
 
 # -- repr helpers ----------------------------------------------------------
 
-def _format_model(obj: GraphQLModel, indent: int) -> str:
-    """Format a GraphQLModel, coercing raw dicts to typed models."""
-    name = type(obj).__name__
-    registry = obj.__type_registry__
+def _format_response(obj: GraphQLResponse, indent: int) -> str:
+    """Format a GraphQLResponse with its model type name."""
+    name = obj._model_cls.__name__ if obj._model_cls else "GraphQLResponse"
+    # Use coerced values from __dict__ (not raw _data).
     items = [
-        (k, v) for k, v in obj._data.items()
-        if k != "__typename" and v is not None
+        (k, obj.__dict__[k]) for k in obj._data
+        if k != "__typename" and k in obj.__dict__ and obj.__dict__[k] is not None
     ]
     if not items:
         return f"{name}()"
 
     # Try compact (single-line) first.
     compact_parts = [
-        f"{k}={_repr_value(v, registry, 0)}" for k, v in items
+        f"{k}={_repr_value(v, 0)}" for k, v in items
     ]
     compact = f"{name}({', '.join(compact_parts)})"
     if len(compact) <= 80:
@@ -305,30 +321,22 @@ def _format_model(obj: GraphQLModel, indent: int) -> str:
     pad = " " * child_indent
     lines = [f"{name}("]
     for k, v in items:
-        val_str = _repr_value(v, registry, child_indent)
+        val_str = _repr_value(v, child_indent)
         lines.append(f"{pad}{k}={val_str},")
     lines.append(" " * indent + ")")
     return "\n".join(lines)
 
 
-def _repr_value(
-    value: Any,
-    registry: dict[str, type[GraphQLModel]],
-    indent: int,
-) -> str:
-    """Format a single value, coercing dicts to their model types."""
+def _repr_value(value: Any, indent: int) -> str:
+    """Format a single value for repr."""
     if value is None:
         return "None"
-    if isinstance(value, dict):
-        typename = value.get("__typename")
-        cls = registry.get(typename, GraphQLModel) if typename else GraphQLModel
-        obj = cls(value)
-        obj.__type_registry__ = registry
-        return _format_model(obj, indent)
+    if isinstance(value, GraphQLResponse):
+        return _format_response(value, indent)
     if isinstance(value, list):
         if not value:
             return "[]"
-        parts = [_repr_value(item, registry, indent + 4) for item in value]
+        parts = [_repr_value(item, indent + 4) for item in value]
         compact = f"[{', '.join(parts)}]"
         if len(compact) <= 80:
             return compact

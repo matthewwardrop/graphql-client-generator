@@ -7,6 +7,7 @@ from .client import GraphQLClientBase, GraphQLError, _ResultRoot
 from .model import (
     FieldNotLoadedError,
     GraphQLModel,
+    GraphQLResponse,
     PathSegment,
     QueryContext,
     graphql_field,
@@ -15,6 +16,7 @@ from .serialization import serialize_input, to_camel_case, to_snake_case
 
 __all__ = [
     "GraphQLModel",
+    "GraphQLResponse",
     "QueryContext",
     "PathSegment",
     "FieldNotLoadedError",
