@@ -124,15 +124,15 @@ gcg.generate_from_endpoint(
 ### Use the generated client
 
 ```python
-from bookstore import BookstoreClient, BookstoreSchema, Variable
-from bookstore.models import Book, Author
+from bookstore import BookstoreClient, BookstoreQuery, BookstoreMutation, Variable
+from bookstore.outputs import Book, Author
 
 client = BookstoreClient("https://api.example.com/graphql")
 ```
 
 ## Query Builder
 
-The generated `BookstoreSchema` object provides a typed, tab-completable
+The generated `BookstoreQuery` object provides a typed, tab-completable
 interface for building GraphQL queries. Every field from the schema is
 available as an attribute with full IDE support.
 
@@ -140,12 +140,12 @@ available as an attribute with full IDE support.
 
 | Syntax | Meaning |
 |--------|---------|
-| `Schema.field` | Select a field |
-| `Schema.field(arg=val)` | Pass arguments to a field |
+| `Query.field` | Select a field |
+| `Query.field(arg=val)` | Pass arguments to a field |
 | `selector[field1, field2]` | Select sub-fields |
 | `selector.as_("alias")` | Alias a field |
 | `Variable.name` | Reference a query variable |
-| `Schema[...]` or `Schema(...)` | Build a complete query |
+| `Query[...]` | Build a complete query |
 
 ### Examples
 
@@ -153,8 +153,8 @@ available as an attribute with full IDE support.
 
 ```python
 result = client.query(
-    BookstoreSchema[
-        BookstoreSchema.book(id=42)[
+    BookstoreQuery[
+        BookstoreQuery.book(id=42)[
             Book.title,
             Book.isbn,
         ],
@@ -163,16 +163,16 @@ result = client.query(
 print(result.book.title)
 ```
 
-`Book.title` and `BookstoreSchema.book.title` are equivalent -- use whichever
+`Book.title` and `BookstoreQuery.book.title` are equivalent -- use whichever
 reads better in context.
 
 **Multiple root fields:**
 
 ```python
 result = client.query(
-    BookstoreSchema[
-        BookstoreSchema.book(id=42)[Book.title, Book.isbn],
-        BookstoreSchema.genres,  # auto-selects all scalar sub-fields
+    BookstoreQuery[
+        BookstoreQuery.book(id=42)[Book.title, Book.isbn],
+        BookstoreQuery.genres,  # auto-selects all scalar sub-fields
     ],
 )
 ```
@@ -182,16 +182,16 @@ result = client.query(
 ```python
 # Top-level alias via keyword argument:
 result = client.query(
-    BookstoreSchema(
-        favourite=BookstoreSchema.book(id=42)[Book.title],
+    BookstoreQuery(
+        favourite=BookstoreQuery.book(id=42)[Book.title],
     ),
 )
 print(result.favourite.title)
 
 # Nested alias via .as_():
 result = client.query(
-    BookstoreSchema[
-        BookstoreSchema.book(id=42)[
+    BookstoreQuery[
+        BookstoreQuery.book(id=42)[
             Book.title,
             Book.reviews.as_("recent_reviews")[
                 Review.rating,
@@ -207,8 +207,8 @@ print(result.book.recent_reviews)
 
 ```python
 result = client.query(
-    BookstoreSchema[
-        BookstoreSchema.book(id=Variable.book_id)[
+    BookstoreQuery[
+        BookstoreQuery.book(id=Variable.book_id)[
             Book.title,
             Book.author[Author.name],
         ],
@@ -230,8 +230,8 @@ result = client.query(
 
 ### Tab Completion
 
-In Jupyter notebooks and IPython, pressing `<Tab>` after `BookstoreSchema.` or
-`BookstoreSchema.book.` lists all available fields. `dir()` on any
+In Jupyter notebooks and IPython, pressing `<Tab>` after `BookstoreQuery.` or
+`BookstoreQuery.book.` lists all available fields. `dir()` on any
 `FieldSelector` returns its child fields.
 
 ### Argument Validation
@@ -240,7 +240,7 @@ Fields that accept arguments have those arguments defined in the schema. If
 you pass an unknown argument, a `TypeError` is raised immediately:
 
 ```python
-BookstoreSchema.book(bad_arg=1)
+BookstoreQuery.book(bad_arg=1)
 # TypeError: Unknown argument 'bad_arg' for field 'book'. Valid arguments: id
 ```
 
@@ -257,9 +257,9 @@ When a composite-type field is used without explicit sub-field selections, all
 of its scalar fields are automatically included:
 
 ```python
-BookstoreSchema.genres
+BookstoreQuery.genres
 # Equivalent to:
-BookstoreSchema.genres[Genre.id, Genre.name, Genre.description]
+BookstoreQuery.genres[Genre.id, Genre.name, Genre.description]
 ```
 
 ## Response Objects
@@ -269,8 +269,8 @@ attribute access. Field names are automatically converted to `snake_case`.
 
 ```python
 result = client.query(
-    BookstoreSchema[
-        BookstoreSchema.book(id=42)[
+    BookstoreQuery[
+        BookstoreQuery.book(id=42)[
             Book.title,
             Book.page_count,
             Book.author[Author.id, Author.name],
@@ -291,8 +291,8 @@ appeared in the query:
 
 ```python
 result = client.query(
-    BookstoreSchema(
-        favourite=BookstoreSchema.book(id=42)[Book.title],
+    BookstoreQuery(
+        favourite=BookstoreQuery.book(id=42)[Book.title],
     ),
 )
 result.favourite.title  # works
@@ -323,8 +323,8 @@ included in the original query triggers an automatic re-query:
 
 ```python
 result = client.query(
-    BookstoreSchema[
-        BookstoreSchema.book(id=42)[Book.title],
+    BookstoreQuery[
+        BookstoreQuery.book(id=42)[Book.title],
     ],
 )
 
@@ -349,9 +349,30 @@ Accessing an unloaded field then raises `FieldNotLoadedError`.
 
 ## Mutations
 
+The generated `BookstoreMutation` object works the same way as `BookstoreQuery`.
+When a mutation field takes a single Input type, its fields are flattened into
+keyword arguments -- no need to construct the Input object manually:
+
 ```python
 result = client.mutate(
-    'mutation { addBook(input: { title: "New Book" }) { id title } }',
+    BookstoreMutation[
+        BookstoreMutation.add_book(title="New Book", author_id="123")[
+            Book.id,
+            Book.title,
+        ],
+    ],
+)
+print(result.add_book.title)
+```
+
+The keyword arguments are forwarded to the `AddBookInput` constructor for
+validation, then serialized as the `input` argument in the GraphQL request.
+
+**Raw GraphQL strings** are also accepted:
+
+```python
+result = client.mutate(
+    'mutation { addBook(input: { title: "New Book", authorId: "123" }) { id title } }',
 )
 ```
 
@@ -360,9 +381,10 @@ result = client.mutate(
 ```
 bookstore/                   # Project root (dist name, hyphens)
   bookstore/                 # Python module (import name, underscores)
-    __init__.py              # Exports client, schema, models, Variable
+    __init__.py              # Exports client, query builder, enums, inputs, outputs
     client.py                # BookstoreClient class
-    models.py                # Schema types, TYPE_REGISTRY, BookstoreSchema
+    schema.py                # BookstoreQuery and BookstoreMutation query builders
+    outputs.py               # Schema types (Book, Author, ...) with SchemaField descriptors
     enums.py                 # Python Enum classes
     inputs.py                # @dataclass input types with to_dict()
     _runtime/                # Standalone runtime library
