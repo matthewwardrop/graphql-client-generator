@@ -10,8 +10,8 @@ from .codegen.client import generate_client
 from .codegen.enums import generate_enums
 from .codegen.inputs import generate_inputs
 from .codegen.outputs import generate_outputs
-from .codegen.schema import generate_schema
 from .codegen.package import generate_init, generate_pyproject
+from .codegen.schema import generate_schema
 from .introspection import fetch_schema_sdl
 from .parser import parse_schema_from_text
 
@@ -31,7 +31,9 @@ def generate_from_file(
     if not as_package:
         flags += " --module"
     regen_command = f"python -m graphql_client_generator {schema_path} -n {package_name}{flags}"
-    return generate_from_text(schema_path.read_text(), package_name, output_dir, as_package, regen_command=regen_command)
+    return generate_from_text(
+        schema_path.read_text(), package_name, output_dir, as_package, regen_command=regen_command
+    )
 
 
 def generate_from_text(
@@ -148,7 +150,9 @@ def generate_from_endpoint(
     if not as_package:
         flags += " --module"
     regen_command = f"python -m graphql_client_generator {endpoint} -n {name}{flags}"
-    return generate_from_text(schema_text, name, output_dir, as_package, regen_command=regen_command)
+    return generate_from_text(
+        schema_text, name, output_dir, as_package, regen_command=regen_command
+    )
 
 
 def _to_pascal_case(name: str) -> str:

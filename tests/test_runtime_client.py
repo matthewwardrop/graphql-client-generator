@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,10 +12,8 @@ from graphql_client_generator._runtime.client import (
     _ResultRoot,
 )
 from graphql_client_generator._runtime.model import (
-    GraphQLModel,
     QueryContext,
 )
-
 
 # ---------------------------------------------------------------------------
 # GraphQLError
@@ -311,6 +308,7 @@ class TestGraphQLClientBaseInit:
 
     def test_init_with_custom_session(self):
         import requests
+
         session = requests.Session()
         client = GraphQLClientBase("http://localhost/graphql", session=session)
         assert client.session is session

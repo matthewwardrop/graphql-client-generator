@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from .._runtime.serialization import to_snake_case
-from ..parser import FieldInfo, SchemaInfo
+
+if TYPE_CHECKING:
+    from ..parser import FieldInfo, SchemaInfo
 
 
 def generate_schema(schema: SchemaInfo, schema_class_name: str) -> str:
@@ -25,9 +28,13 @@ def generate_schema(schema: SchemaInfo, schema_class_name: str) -> str:
         "",
     ]
 
-    lines.extend(_generate_schema_class(
-        schema_class_name, schema, all_composite_names,
-    ))
+    lines.extend(
+        _generate_schema_class(
+            schema_class_name,
+            schema,
+            all_composite_names,
+        )
+    )
     lines.append("")
 
     return "\n".join(lines)
@@ -103,9 +110,7 @@ def _generate_schema_field(
     # Build arg_types dict if the field has arguments.
     arg_types_str = ""
     if f.arguments:
-        arg_entries = ", ".join(
-            f'"{a.name}": "{a.graphql_type}"' for a in f.arguments
-        )
+        arg_entries = ", ".join(f'"{a.name}": "{a.graphql_type}"' for a in f.arguments)
         arg_types_str = f", arg_types={{{arg_entries}}}"
 
     # Build doc string.

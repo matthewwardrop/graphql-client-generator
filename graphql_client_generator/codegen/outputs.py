@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from .._runtime.serialization import to_snake_case
-from ..parser import FieldInfo, SchemaInfo
 
+if TYPE_CHECKING:
+    from ..parser import FieldInfo, SchemaInfo
 
 # Scalar type names that should NOT get a target_cls.
 _SCALAR_NAMES = {"str", "int", "float", "bool", "Any"}
@@ -37,20 +39,30 @@ def generate_outputs(schema: SchemaInfo) -> str:
 
     # Interfaces first (they are base classes).
     for iface in sorted(schema.interfaces, key=lambda i: i.name):
-        lines.extend(_generate_model_class(
-            iface.name, iface.fields, iface.description,
-            base="GraphQLModel", composite_names=all_composite_names,
-        ))
+        lines.extend(
+            _generate_model_class(
+                iface.name,
+                iface.fields,
+                iface.description,
+                base="GraphQLModel",
+                composite_names=all_composite_names,
+            )
+        )
         lines.append("")
         all_type_names.append(iface.name)
 
     # Object types.
     for t in sorted(schema.types, key=lambda t: t.name):
         base = t.interfaces[0] if t.interfaces else "GraphQLModel"
-        lines.extend(_generate_model_class(
-            t.name, t.fields, t.description,
-            base=base, composite_names=all_composite_names,
-        ))
+        lines.extend(
+            _generate_model_class(
+                t.name,
+                t.fields,
+                t.description,
+                base=base,
+                composite_names=all_composite_names,
+            )
+        )
         lines.append("")
         all_type_names.append(t.name)
 
@@ -121,9 +133,7 @@ def _generate_schema_field(
     # Build arg_types dict if the field has arguments.
     arg_types_str = ""
     if f.arguments:
-        arg_entries = ", ".join(
-            f'"{a.name}": "{a.graphql_type}"' for a in f.arguments
-        )
+        arg_entries = ", ".join(f'"{a.name}": "{a.graphql_type}"' for a in f.arguments)
         arg_types_str = f", arg_types={{{arg_entries}}}"
 
     # Build doc string.
@@ -161,7 +171,7 @@ def _generate_result_class(name: str, fields: list[FieldInfo]) -> list[str]:
 def _format_docstring(description: str, indent: int) -> list[str]:
     """Return a properly indented triple-quoted docstring for *description*."""
     pad = " " * indent
-    escaped = description.replace('"""', r'\"\"\"')
+    escaped = description.replace('"""', r"\"\"\"")
     raw = escaped.splitlines()
     if len(raw) == 1:
         return [f'{pad}"""{escaped}"""']
@@ -176,10 +186,7 @@ def _format_docstring(description: str, indent: int) -> list[str]:
 def _format_comment(description: str, indent: int) -> list[str]:
     """Return each line of *description* as a ``# `` comment."""
     pad = " " * indent
-    return [
-        f"{pad}# {line}" if line.strip() else f"{pad}#"
-        for line in description.splitlines()
-    ]
+    return [f"{pad}# {line}" if line.strip() else f"{pad}#" for line in description.splitlines()]
 
 
 def _unwrap_type_name(graphql_type: str) -> str:

@@ -2,23 +2,10 @@
 
 from __future__ import annotations
 
-import textwrap
-from pathlib import Path
-
-import pytest
-
 from graphql import build_schema
-from graphql.type import GraphQLList, GraphQLNonNull
 
 from graphql_client_generator.parser import (
-    EnumInfo,
-    FieldArgInfo,
-    FieldInfo,
-    InputInfo,
-    InterfaceInfo,
     SchemaInfo,
-    TypeInfo,
-    UnionInfo,
     _detect_one_of_inputs,
     _graphql_type_to_python,
     _is_list_type,
@@ -26,7 +13,6 @@ from graphql_client_generator.parser import (
     parse_schema,
     parse_schema_from_text,
 )
-
 
 # ---------------------------------------------------------------------------
 # Tests for parse_schema with minimal_schema fixture
@@ -58,9 +44,7 @@ class TestParseSchemaMinimal:
     def test_inputs_extracted(self, minimal_schema: SchemaInfo):
         input_names = {i.name for i in minimal_schema.inputs}
         assert "CreateUserInput" in input_names
-        create_input = next(
-            i for i in minimal_schema.inputs if i.name == "CreateUserInput"
-        )
+        create_input = next(i for i in minimal_schema.inputs if i.name == "CreateUserInput")
         field_names = [f.name for f in create_input.fields]
         assert "name" in field_names
         assert "email" in field_names
@@ -69,24 +53,18 @@ class TestParseSchemaMinimal:
     def test_interfaces_extracted(self, minimal_schema: SchemaInfo):
         iface_names = {i.name for i in minimal_schema.interfaces}
         assert "Node" in iface_names
-        node_iface = next(
-            i for i in minimal_schema.interfaces if i.name == "Node"
-        )
+        node_iface = next(i for i in minimal_schema.interfaces if i.name == "Node")
         assert len(node_iface.fields) == 1
         assert node_iface.fields[0].name == "id"
 
     def test_interface_implementing_types(self, minimal_schema: SchemaInfo):
-        node_iface = next(
-            i for i in minimal_schema.interfaces if i.name == "Node"
-        )
+        node_iface = next(i for i in minimal_schema.interfaces if i.name == "Node")
         assert sorted(node_iface.implementing_types) == ["Post", "User"]
 
     def test_unions_extracted(self, minimal_schema: SchemaInfo):
         union_names = {u.name for u in minimal_schema.unions}
         assert "SearchResult" in union_names
-        search_union = next(
-            u for u in minimal_schema.unions if u.name == "SearchResult"
-        )
+        search_union = next(u for u in minimal_schema.unions if u.name == "SearchResult")
         assert sorted(search_union.member_types) == ["Post", "User"]
 
     def test_no_scalars_in_minimal(self, minimal_schema: SchemaInfo):
@@ -163,9 +141,7 @@ class TestParseSchemaMinimal:
         assert posts_field.graphql_type == "[Post!]!"
 
     def test_input_field_info(self, minimal_schema: SchemaInfo):
-        create_input = next(
-            i for i in minimal_schema.inputs if i.name == "CreateUserInput"
-        )
+        create_input = next(i for i in minimal_schema.inputs if i.name == "CreateUserInput")
         name_field = next(f for f in create_input.fields if f.name == "name")
         assert name_field.is_non_null is True
         assert name_field.graphql_type == "String!"
@@ -175,9 +151,7 @@ class TestParseSchemaMinimal:
         assert email_field.is_non_null is False
 
     def test_input_not_one_of(self, minimal_schema: SchemaInfo):
-        create_input = next(
-            i for i in minimal_schema.inputs if i.name == "CreateUserInput"
-        )
+        create_input = next(i for i in minimal_schema.inputs if i.name == "CreateUserInput")
         assert create_input.is_one_of is False
 
     def test_mutation_field(self, minimal_schema: SchemaInfo):
@@ -227,17 +201,13 @@ class TestParseSchemaScalar:
         type_names = {t.name for t in scalar_schema.types}
         assert "Event" in type_names
         event = next(t for t in scalar_schema.types if t.name == "Event")
-        timestamp_field = next(
-            f for f in event.fields if f.name == "timestamp"
-        )
+        timestamp_field = next(f for f in event.fields if f.name == "timestamp")
         assert timestamp_field.graphql_type == "DateTime!"
         assert timestamp_field.python_type == "str"
 
     def test_json_field_python_type(self, scalar_schema: SchemaInfo):
         event = next(t for t in scalar_schema.types if t.name == "Event")
-        metadata_field = next(
-            f for f in event.fields if f.name == "metadata"
-        )
+        metadata_field = next(f for f in event.fields if f.name == "metadata")
         assert metadata_field.graphql_type == "JSON"
         assert metadata_field.python_type == "Any | None"
 
@@ -423,11 +393,7 @@ class TestDetectOneOfInputs:
         assert result == set()
 
     def test_multiple_oneof(self):
-        text = (
-            "input A @oneOf { x: String }\n"
-            "input B @oneOf { y: String }\n"
-            "input C { z: String }\n"
-        )
+        text = "input A @oneOf { x: String }\ninput B @oneOf { y: String }\ninput C { z: String }\n"
         result = _detect_one_of_inputs(text)
         assert result == {"A", "B"}
 
@@ -440,6 +406,7 @@ class TestDetectOneOfInputs:
 # ---------------------------------------------------------------------------
 # Tests for parse_schema_from_text
 # ---------------------------------------------------------------------------
+
 
 class TestParseSchemaFromText:
     def test_same_result_as_parse_schema(self, minimal_schema_path, minimal_schema):
