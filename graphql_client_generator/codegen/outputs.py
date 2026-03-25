@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from .._runtime.serialization import to_snake_case
 
 if TYPE_CHECKING:
-    from ..parser import FieldInfo, SchemaInfo
+    from ..parser import FieldInfo, InputInfo, SchemaInfo
 
 # Scalar type names that should NOT get a target_cls.
 _SCALAR_NAMES = {"str", "int", "float", "bool", "Any"}
@@ -23,16 +23,28 @@ def generate_outputs(schema: SchemaInfo) -> str:
     for iface in schema.interfaces:
         all_composite_names.add(iface.name)
 
+    # Build input map for detecting and flattening input args.
+    input_map: dict[str, InputInfo] = {inp.name: inp for inp in schema.inputs}
+
+    # Check if any output field references an input type (for conditional import).
+    needs_inputs_import = _any_field_has_input_arg(schema, input_map)
+
     lines = [
         '"""GraphQL schema output types."""',
         "",
         "from __future__ import annotations",
         "",
-        "from ._runtime.builder import SchemaField",
-        "from ._runtime.client import _ResultRoot",
-        "from ._runtime.model import GraphQLModel",
-        "",
     ]
+    if needs_inputs_import:
+        lines.append("from . import inputs")
+    lines.extend(
+        [
+            "from ._runtime.builder import SchemaField",
+            "from ._runtime.client import _ResultRoot",
+            "from ._runtime.model import GraphQLModel",
+            "",
+        ]
+    )
 
     # Collect all type names for the registry.
     all_type_names: list[str] = []
@@ -46,6 +58,7 @@ def generate_outputs(schema: SchemaInfo) -> str:
                 iface.description,
                 base="GraphQLModel",
                 composite_names=all_composite_names,
+                input_map=input_map,
             )
         )
         lines.append("")
@@ -61,6 +74,7 @@ def generate_outputs(schema: SchemaInfo) -> str:
                 t.description,
                 base=base,
                 composite_names=all_composite_names,
+                input_map=input_map,
             )
         )
         lines.append("")
@@ -99,6 +113,7 @@ def _generate_model_class(
     description: str,
     base: str,
     composite_names: set[str],
+    input_map: dict[str, InputInfo],
 ) -> list[str]:
     """Generate a single model class with SchemaField descriptors."""
     lines: list[str] = []
@@ -114,15 +129,32 @@ def _generate_model_class(
         return lines
 
     for f in fields:
-        lines.append(_generate_schema_field(f, composite_names, indent=4))
+        detected = _detect_input_arg(f, input_map)
+        lines.append(_generate_schema_field(f, composite_names, indent=4, input_info=detected))
 
     return lines
+
+
+def _detect_input_arg(
+    f: FieldInfo,
+    input_map: dict[str, InputInfo],
+) -> tuple[str, InputInfo] | None:
+    """Return (arg_name, InputInfo) if the field has exactly one Input-typed arg."""
+    matches: list[tuple[str, InputInfo]] = []
+    for a in f.arguments:
+        type_name = _unwrap_type_name(a.graphql_type)
+        if type_name in input_map:
+            matches.append((a.name, input_map[type_name]))
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def _generate_schema_field(
     f: FieldInfo,
     composite_names: set[str],
     indent: int,
+    input_info: tuple[str, InputInfo] | None = None,
 ) -> str:
     """Generate a single SchemaField line (using lambda for deferred resolution)."""
     pad = " " * indent
@@ -130,11 +162,20 @@ def _generate_schema_field(
     target_type = _unwrap_type_name(f.graphql_type)
     target_cls = f"lambda: {target_type}" if target_type in composite_names else "None"
 
-    # Build arg_types dict if the field has arguments.
-    arg_types_str = ""
-    if f.arguments:
+    # Build arg_types dict and optional input_arg/input_cls.
+    input_extra = ""
+    if input_info:
+        arg_name, inp = input_info
+        arg_entries = ", ".join(
+            f'"{to_snake_case(field.name)}": "{field.graphql_type}"' for field in inp.fields
+        )
+        arg_types_str = f", arg_types={{{arg_entries}}}"
+        input_extra = f', input_arg="{arg_name}", input_cls=inputs.{inp.name}'
+    elif f.arguments:
         arg_entries = ", ".join(f'"{a.name}": "{a.graphql_type}"' for a in f.arguments)
         arg_types_str = f", arg_types={{{arg_entries}}}"
+    else:
+        arg_types_str = ""
 
     # Build doc string.
     doc_str = ""
@@ -146,7 +187,7 @@ def _generate_schema_field(
         f'{pad}{py_name} = SchemaField("{f.name}", '
         f'graphql_type="{f.graphql_type}", '
         f"target_cls={target_cls}"
-        f"{arg_types_str}{doc_str})"
+        f"{arg_types_str}{doc_str}{input_extra})"
     )
 
 
@@ -187,6 +228,22 @@ def _format_comment(description: str, indent: int) -> list[str]:
     """Return each line of *description* as a ``# `` comment."""
     pad = " " * indent
     return [f"{pad}# {line}" if line.strip() else f"{pad}#" for line in description.splitlines()]
+
+
+def _any_field_has_input_arg(
+    schema: SchemaInfo,
+    input_map: dict[str, InputInfo],
+) -> bool:
+    """Return True if any output type field has a detected input arg."""
+    for t in schema.types:
+        for f in t.fields:
+            if _detect_input_arg(f, input_map):
+                return True
+    for iface in schema.interfaces:
+        for f in iface.fields:
+            if _detect_input_arg(f, input_map):
+                return True
+    return False
 
 
 def _unwrap_type_name(graphql_type: str) -> str:

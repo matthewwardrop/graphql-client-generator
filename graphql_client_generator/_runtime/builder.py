@@ -68,11 +68,15 @@ class FieldSelector:
         target_cls: Any = None,
         arg_types: dict[str, str] | None = None,
         arg_doc: str = "",
+        input_arg: str | None = None,
+        input_cls: Any = None,
     ) -> None:
         self._graphql_name = graphql_name
         self._target_cls = target_cls
         self._arg_types = arg_types or {}
         self._arg_doc = arg_doc
+        self._input_arg = input_arg
+        self._input_cls = input_cls
         self._args: dict[str, Any] = {}
         self._sub_selections: list[FieldSelector] = []
         self._alias: str | None = None
@@ -100,6 +104,8 @@ class FieldSelector:
             self._target_cls,
             self._arg_types,
             self._arg_doc,
+            self._input_arg,
+            self._input_cls,
         )
         node._args = dict(self._args)
         node._sub_selections = list(self._sub_selections)
@@ -110,6 +116,10 @@ class FieldSelector:
 
     def __call__(self, **kwargs: Any) -> FieldSelector:
         """Set field arguments.
+
+        When the field has a detected input type, keyword arguments are
+        forwarded to the Input class constructor for validation, then
+        stored as a single GraphQL argument.
 
         Raises ``TypeError`` if the field accepts no arguments or if an
         unknown argument name is provided.
@@ -136,7 +146,12 @@ class FieldSelector:
                 f"'{self._graphql_name}': {', '.join(missing)}"
             )
         node = self._clone()
-        node._args = dict(kwargs)
+        if self._input_arg and self._input_cls:
+            # Flatten mode: forward kwargs to Input constructor, wrap result.
+            input_obj = self._input_cls(**kwargs)
+            node._args = {self._input_arg: input_obj}
+        else:
+            node._args = dict(kwargs)
         return node
 
     # -- sub-selections via __getitem__ ----------------------------------------
@@ -151,17 +166,26 @@ class FieldSelector:
         via ``__call__`` first.
         """
         # Validate required args before allowing sub-selections.
-        missing = [
-            name
-            for name, gql_type in self._arg_types.items()
-            if gql_type.endswith("!") and name not in self._args
-        ]
-        if missing:
-            raise TypeError(
-                f"Missing required argument(s) for field "
-                f"'{self._graphql_name}': {', '.join(missing)}. "
-                f"Call the field with arguments before selecting sub-fields."
-            )
+        if self._input_arg:
+            # Flattened input mode: check the wrapped arg is present.
+            if self._input_arg not in self._args:
+                raise TypeError(
+                    f"Missing required argument(s) for field "
+                    f"'{self._graphql_name}'. "
+                    f"Call the field with arguments before selecting sub-fields."
+                )
+        else:
+            missing = [
+                name
+                for name, gql_type in self._arg_types.items()
+                if gql_type.endswith("!") and name not in self._args
+            ]
+            if missing:
+                raise TypeError(
+                    f"Missing required argument(s) for field "
+                    f"'{self._graphql_name}': {', '.join(missing)}. "
+                    f"Call the field with arguments before selecting sub-fields."
+                )
         if not isinstance(selections, tuple):
             selections = (selections,)
         node = self._clone()
@@ -234,6 +258,8 @@ class SchemaField:
         target_cls: Any = None,
         arg_types: dict[str, str] | None = None,
         doc: str = "",
+        input_arg: str | None = None,
+        input_cls: Any = None,
     ) -> None:
         self.graphql_name = graphql_name
         self.graphql_type = graphql_type
@@ -241,6 +267,8 @@ class SchemaField:
         self._target_cls = target_cls
         self._arg_types = arg_types or {}
         self._doc = doc
+        self._input_arg = input_arg
+        self._input_cls = input_cls
 
     def __set_name__(self, owner: type, name: str) -> None:
         self.attr_name = name
@@ -254,6 +282,8 @@ class SchemaField:
             target_cls=self._target_cls,
             arg_types=self._arg_types,
             arg_doc=self._doc,
+            input_arg=self._input_arg,
+            input_cls=self._input_cls,
         )
 
     def __repr__(self) -> str:
@@ -387,4 +417,6 @@ def _to_literal(value: Any) -> str:
         return f"{{{inner}}}"
     if value is None:
         return "null"
+    if hasattr(value, "to_dict"):
+        return _to_literal(value.to_dict())
     return str(value)

@@ -71,6 +71,7 @@ def generate_from_text(
     pascal = _to_pascal_case(package_name)
     client_class_name = pascal + "Client"
     schema_class_name = pascal + "Schema"
+    mutation_class_name = pascal + "MutationSchema" if schema.mutation_type else ""
 
     # Create the module directory (and any parents).
     module_dir.mkdir(parents=True, exist_ok=True)
@@ -86,11 +87,21 @@ def generate_from_text(
     _write(module_dir / "enums.py", generate_enums(schema))
     _write(module_dir / "inputs.py", generate_inputs(schema))
     _write(module_dir / "outputs.py", generate_outputs(schema))
-    _write(module_dir / "schema.py", generate_schema(schema, schema_class_name))
+    _write(
+        module_dir / "schema.py",
+        generate_schema(schema, schema_class_name, mutation_class_name),
+    )
     _write(module_dir / "client.py", generate_client(schema, client_class_name))
     _write(
         module_dir / "__init__.py",
-        generate_init(schema, python_name, client_class_name, schema_class_name, regen_command),
+        generate_init(
+            schema,
+            python_name,
+            client_class_name,
+            schema_class_name,
+            mutation_class_name,
+            regen_command,
+        ),
     )
     if as_package:
         _write(project_dir / "pyproject.toml", generate_pyproject(dist_name))

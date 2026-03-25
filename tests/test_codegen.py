@@ -10,8 +10,10 @@ from graphql_client_generator.codegen.package import generate_init, generate_pyp
 from graphql_client_generator.codegen.schema import generate_schema
 from graphql_client_generator.parser import (
     EnumInfo,
+    FieldArgInfo,
     FieldInfo,
     InputInfo,
+    InterfaceInfo,
     SchemaInfo,
     TypeInfo,
     UnionInfo,
@@ -242,6 +244,67 @@ class TestGenerateOutputs:
         assert "class User(" in code
         assert "class Post(" in code
 
+    def test_nested_field_with_flattened_input(self):
+        """Fields on output types with a single Input-typed arg get flattened."""
+        schema = SchemaInfo(
+            inputs=[
+                InputInfo(
+                    name="UpdateInput",
+                    fields=[
+                        FieldInfo("name", "String!", "str", is_non_null=True),
+                    ],
+                ),
+            ],
+            types=[
+                TypeInfo(
+                    name="UserOps",
+                    fields=[
+                        FieldInfo(
+                            name="update",
+                            graphql_type="User!",
+                            python_type="User",
+                            arguments=[
+                                FieldArgInfo("input", "UpdateInput!", "UpdateInput"),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        code = generate_outputs(schema)
+        assert 'input_arg="input"' in code
+        assert "input_cls=inputs.UpdateInput" in code
+        assert "from . import inputs" in code
+
+    def test_interface_field_with_flattened_input(self):
+        """Interface fields with Input-typed args also get flattened."""
+        schema = SchemaInfo(
+            inputs=[
+                InputInfo(
+                    name="ActionInput",
+                    fields=[FieldInfo("reason", "String!", "str", is_non_null=True)],
+                ),
+            ],
+            interfaces=[
+                InterfaceInfo(
+                    name="Actionable",
+                    fields=[
+                        FieldInfo(
+                            name="perform",
+                            graphql_type="Boolean!",
+                            python_type="bool",
+                            arguments=[
+                                FieldArgInfo("input", "ActionInput!", "ActionInput"),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
+        code = generate_outputs(schema)
+        assert "input_cls=inputs.ActionInput" in code
+        assert "from . import inputs" in code
+
     def test_interface_class_generated(self, minimal_schema: SchemaInfo):
         code = generate_outputs(minimal_schema)
         assert "class Node(GraphQLModel):" in code
@@ -357,23 +420,59 @@ class TestGenerateSchema:
         assert '"user"' in code
         assert '"users"' in code
 
-    def test_schema_class_has_mutate(self, minimal_schema: SchemaInfo):
-        code = generate_schema(minimal_schema, "TestSchema")
-        assert "class mutate:" in code
+    def test_has_mutation_class(self, minimal_schema: SchemaInfo):
+        code = generate_schema(minimal_schema, "TestSchema", "TestMutation")
+        assert "class _TestMutation:" in code
+        assert "TestMutation = _TestMutation()" in code
 
-    def test_imports_outputs(self, minimal_schema: SchemaInfo):
+    def test_mutation_field_has_flattened_input(self, minimal_schema: SchemaInfo):
+        code = generate_schema(minimal_schema, "TestSchema", "TestMutation")
+        assert 'input_arg="input"' in code
+        assert "input_cls=inputs.CreateUserInput" in code
+        # arg_types should have flattened Input fields, not the original arg
+        assert '"name": "String!"' in code
+        assert '"role": "Role!"' in code
+
+    def test_no_mutation_class_when_empty(self, empty_schema: SchemaInfo):
+        code = generate_schema(empty_schema, "TestSchema")
+        assert "class _TestSchema:" in code
+        assert "Mutation" not in code
+
+    def test_imports_outputs_and_inputs(self, minimal_schema: SchemaInfo):
         code = generate_schema(minimal_schema, "TestSchema")
-        assert "from . import outputs" in code
+        assert "from . import inputs, outputs" in code
 
     def test_uses_direct_type_refs(self, minimal_schema: SchemaInfo):
         code = generate_schema(minimal_schema, "TestSchema")
         assert "outputs." in code
         assert "lambda:" not in code
 
-    def test_empty_schema(self, empty_schema: SchemaInfo):
-        code = generate_schema(empty_schema, "TestSchema")
+    def test_mutation_getitem_builds_mutation(self, minimal_schema: SchemaInfo):
+        code = generate_schema(minimal_schema, "TestSchema", "TestMutation")
+        assert '"mutation"' in code
+
+    def test_no_query_type_still_generates(self):
+        schema = SchemaInfo()
+        code = generate_schema(schema, "TestSchema")
         assert "class _TestSchema:" in code
-        assert "MutationResult" not in code
+
+    def test_mutation_no_input_arg_when_scalar_args(self):
+        schema = SchemaInfo(
+            inputs=[],
+            mutation_type=TypeInfo(
+                name="Mutation",
+                fields=[
+                    FieldInfo(
+                        name="deleteUser",
+                        graphql_type="Boolean!",
+                        python_type="bool",
+                        arguments=[FieldArgInfo("id", "ID!", "str")],
+                    ),
+                ],
+            ),
+        )
+        code = generate_schema(schema, "TestSchema", "TestMutation")
+        assert "input_arg" not in code
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +541,21 @@ class TestGenerateInit:
     def test_imports_schema_class(self, minimal_schema: SchemaInfo):
         code = generate_init(minimal_schema, "my_package", "MyClient", "MySchema")
         assert "from .schema import MySchema" in code
+
+    def test_imports_mutation_class(self, minimal_schema: SchemaInfo):
+        code = generate_init(
+            minimal_schema,
+            "my_package",
+            "MyClient",
+            "MySchema",
+            mutation_class_name="MyMutation",
+        )
+        assert "from .schema import MySchema, MyMutation" in code
+        assert "'MyMutation'" in code
+
+    def test_no_mutation_when_empty(self, minimal_schema: SchemaInfo):
+        code = generate_init(minimal_schema, "my_package", "MyClient", "MySchema")
+        assert "MyMutation" not in code
 
     def test_imports_modules(self, minimal_schema: SchemaInfo):
         code = generate_init(minimal_schema, "my_package", "MyClient", "MySchema")
