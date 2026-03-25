@@ -24,6 +24,7 @@ class TestCLI:
                 minimal_schema_path,
                 minimal_schema_path.stem,
                 output_dir,
+                as_package=True,
             )
 
     def test_custom_name(self, tmp_path: Path, minimal_schema_path: Path):
@@ -43,6 +44,7 @@ class TestCLI:
                 minimal_schema_path,
                 "custom_client",
                 output_dir,
+                as_package=True,
             )
 
     def test_custom_output(self, tmp_path: Path, minimal_schema_path: Path):
@@ -113,6 +115,7 @@ class TestCLI:
                 minimal_schema_path,
                 "my_pkg",
                 output_dir,
+                as_package=True,
             )
 
 
@@ -129,7 +132,9 @@ class TestCLIEndpoint:
         ):
             main(["https://api.example.com/graphql", "-n", "my_client", "-o", str(output_dir)])
         mock_fetch.assert_called_once_with("https://api.example.com/graphql", headers=None)
-        mock_gen.assert_called_once_with("type Query { ping: String }", "my_client", output_dir)
+        mock_gen.assert_called_once_with(
+            "type Query { ping: String }", "my_client", output_dir, as_package=True
+        )
 
     def test_url_default_name_is_client(self, tmp_path: Path):
         """When no --name is given for a URL, package name defaults to 'client'."""
@@ -191,3 +196,19 @@ class TestMain:
         )
         assert result.returncode == 0
 
+
+
+class TestModuleFlag:
+    def test_module_flag_passes_as_package_false(self, tmp_path: Path, minimal_schema_path: Path):
+        with patch("graphql_client_generator.cli.generate_from_file") as mock_gen:
+            mock_gen.return_value = tmp_path / "test_client"
+            main([str(minimal_schema_path), "--module", "-o", str(tmp_path)])
+        _, kwargs = mock_gen.call_args
+        assert kwargs["as_package"] is False
+
+    def test_no_module_flag_passes_as_package_true(self, tmp_path: Path, minimal_schema_path: Path):
+        with patch("graphql_client_generator.cli.generate_from_file") as mock_gen:
+            mock_gen.return_value = tmp_path / "test_client"
+            main([str(minimal_schema_path), "-o", str(tmp_path)])
+        _, kwargs = mock_gen.call_args
+        assert kwargs["as_package"] is True

@@ -159,5 +159,27 @@ class TestGenerateFromEndpoint:
             session=None,
             headers={"Authorization": "Bearer tok"},
         )
-        mock_gen.assert_called_once_with("type Query { ping: String }", "client", tmp_path)
+        mock_gen.assert_called_once_with("type Query { ping: String }", "client", tmp_path, True)
         assert result == tmp_path / "client"
+
+
+class TestModuleMode:
+    def test_no_pyproject_when_as_package_false(
+        self, tmp_path: Path, minimal_schema_path: Path
+    ):
+        pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path, as_package=False)
+        assert not (pkg / "pyproject.toml").exists()
+
+    def test_python_files_present_when_as_package_false(
+        self, tmp_path: Path, minimal_schema_path: Path
+    ):
+        pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path, as_package=False)
+        for fname in ("__init__.py", "enums.py", "inputs.py", "models.py", "client.py"):
+            assert (pkg / fname).exists(), f"Missing file: {fname}"
+        assert (pkg / "_runtime").is_dir()
+
+    def test_pyproject_present_by_default(
+        self, tmp_path: Path, minimal_schema_path: Path
+    ):
+        pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path)
+        assert (pkg / "pyproject.toml").exists()
