@@ -19,22 +19,29 @@ def generate_from_file(
     schema_path: str | Path,
     package_name: str,
     output_dir: str | Path,
+    as_package: bool = True,
 ) -> Path:
-    """Generate a complete Python client package from a ``.graphqls`` schema file.
+    """Generate a Python client from a ``.graphqls`` schema file.
 
-    Returns the path to the generated package directory.
+    Returns the path to the generated directory.
     """
-    return generate_from_text(Path(schema_path).read_text(), package_name, output_dir)
+    return generate_from_text(Path(schema_path).read_text(), package_name, output_dir, as_package)
 
 
 def generate_from_text(
     schema_text: str,
     package_name: str,
     output_dir: str | Path = ".",
+    as_package: bool = True,
 ) -> Path:
-    """Generate a complete Python client package from SDL text.
+    """Generate a Python client from SDL text.
 
-    Returns the path to the generated package directory.
+    When *as_package* is ``True`` (the default) a standalone ``pyproject.toml``
+    is written alongside the Python sources, producing a complete installable
+    package.  Pass ``as_package=False`` to emit only the Python files, suitable
+    for embedding inside an existing package.
+
+    Returns the path to the generated directory.
     """
     output_dir = Path(output_dir)
     package_dir = output_dir / package_name
@@ -66,7 +73,8 @@ def generate_from_text(
         package_dir / "__init__.py",
         generate_init(schema, package_name, client_class_name, schema_class_name),
     )
-    _write(package_dir / "pyproject.toml", generate_pyproject(package_name))
+    if as_package:
+        _write(package_dir / "pyproject.toml", generate_pyproject(package_name))
 
     return package_dir
 
@@ -81,6 +89,7 @@ def generate_from_endpoint(
     output_dir: str | Path = ".",
     session: object | None = None,
     headers: dict[str, str] | None = None,
+    as_package: bool = True,
 ) -> Path:
     """Generate a typed Python client package by introspecting a live GraphQL endpoint.
 
@@ -118,7 +127,7 @@ def generate_from_endpoint(
     PosixPath('my_client')
     """
     schema_text = fetch_schema_sdl(endpoint, session=session, headers=headers)
-    return generate_from_text(schema_text, name, output_dir)
+    return generate_from_text(schema_text, name, output_dir, as_package)
 
 
 def _to_pascal_case(name: str) -> str:

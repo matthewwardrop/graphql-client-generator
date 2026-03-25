@@ -30,6 +30,14 @@ def main(argv: list[str] | None = None) -> None:
         default=".",
     )
     parser.add_argument(
+        "--module",
+        action="store_true",
+        help=(
+            "Emit Python source files only (no pyproject.toml). "
+            "Use this when embedding the generated client inside an existing package."
+        ),
+    )
+    parser.add_argument(
         "-H", "--header",
         action="append",
         dest="headers",
@@ -56,7 +64,7 @@ def main(argv: list[str] | None = None) -> None:
             sys.exit(1)
 
         package_name = args.name or "client"
-        result_path = generate_from_text(schema_text, package_name, output_dir)
+        result_path = generate_from_text(schema_text, package_name, output_dir, as_package=not args.module)
     else:
         # Local file.
         schema_path = Path(args.schema)
@@ -65,9 +73,9 @@ def main(argv: list[str] | None = None) -> None:
             sys.exit(1)
 
         package_name = args.name or schema_path.stem
-        result_path = generate_from_file(schema_path, package_name, output_dir)
+        result_path = generate_from_file(schema_path, package_name, output_dir, as_package=not args.module)
 
-    print(f"Generated package: {result_path}")
+    print(f"Generated: {result_path}")
 
 
 def _parse_headers(raw: list[str]) -> dict[str, str]:

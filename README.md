@@ -68,6 +68,13 @@ python -m graphql_client_generator bookstore.graphqls
 This produces a standalone Python package (`bookstore/`) with typed models,
 a client class, and a query builder.
 
+To embed the generated client inside an existing package instead, pass
+`--module` to skip the `pyproject.toml`:
+
+```bash
+python -m graphql_client_generator bookstore.graphqls --module
+```
+
 ### Generate a client from a live endpoint
 
 Pass an `http://` or `https://` URL instead of a file path and the schema is
@@ -101,6 +108,7 @@ gcg.generate_from_endpoint(
     "https://api.example.com/graphql",
     name="bookstore",
     session=session,
+    # as_package=False  # omit pyproject.toml when embedding in an existing package
 )
 ```
 
@@ -110,6 +118,7 @@ gcg.generate_from_endpoint(
 |------|-------------|---------|
 | `-n`, `--name` | Package name | Schema filename stem (file) or `client` (URL) |
 | `-o`, `--output` | Output directory | Current directory |
+| `--module` | Emit Python files only, no `pyproject.toml` | Off |
 | `-H`, `--header` | HTTP header for introspection (`Name: Value`), repeatable | |
 
 ### Use the generated client
