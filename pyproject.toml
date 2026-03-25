@@ -7,7 +7,7 @@ name = "graphql-client-generator"
 version = "0.1.0"
 description = "Generate typed Python clients from GraphQL schemas"
 requires-python = ">=3.10"
-dependencies = ["graphql-core>=3.2"]
+dependencies = ["graphql-core>=3.2", "requests>=2.0"]
 
 [project.scripts]
 graphql-client-generator = "graphql_client_generator.cli:main"
@@ -45,6 +45,9 @@ check_untyped_defs = true
 [[tool.mypy.overrides]]
 module = ["graphql", "graphql.*"]
 ignore_missing_imports = true
+
+[tool.coverage.run]
+omit = ["graphql_client_generator/__main__.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

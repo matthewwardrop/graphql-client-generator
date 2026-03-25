@@ -120,7 +120,12 @@ _CUSTOM_SCALAR_MAP: dict[str, str] = {
 
 def parse_schema(path: str | Path) -> SchemaInfo:
     """Parse a ``.graphqls`` file and return a :class:`SchemaInfo`."""
-    text = Path(path).read_text()
+    return parse_schema_from_text(Path(path).read_text())
+
+
+def parse_schema_from_text(schema_text: str) -> SchemaInfo:
+    """Parse SDL text directly and return a :class:`SchemaInfo`."""
+    text = schema_text
 
     # graphql-core's build_schema doesn't handle directives on input types
     # well, so we detect @oneOf manually.

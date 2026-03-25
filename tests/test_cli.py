@@ -16,7 +16,7 @@ class TestCLI:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         with patch(
-            "graphql_client_generator.cli.generate"
+            "graphql_client_generator.cli.generate_from_file"
         ) as mock_generate:
             mock_generate.return_value = output_dir / "minimal"
             main([str(minimal_schema_path), "-o", str(output_dir)])
@@ -31,7 +31,7 @@ class TestCLI:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         with patch(
-            "graphql_client_generator.cli.generate"
+            "graphql_client_generator.cli.generate_from_file"
         ) as mock_generate:
             mock_generate.return_value = output_dir / "custom_client"
             main([
@@ -50,7 +50,7 @@ class TestCLI:
         output_dir = tmp_path / "my_output"
         output_dir.mkdir()
         with patch(
-            "graphql_client_generator.cli.generate"
+            "graphql_client_generator.cli.generate_from_file"
         ) as mock_generate:
             mock_generate.return_value = output_dir / "minimal"
             main([str(minimal_schema_path), "-o", str(output_dir)])
@@ -72,7 +72,7 @@ class TestCLI:
         output_dir.mkdir()
         result_path = output_dir / "minimal"
         with patch(
-            "graphql_client_generator.cli.generate"
+            "graphql_client_generator.cli.generate_from_file"
         ) as mock_generate:
             mock_generate.return_value = result_path
             main([str(minimal_schema_path), "-o", str(output_dir)])
@@ -86,7 +86,7 @@ class TestCLI:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         with patch(
-            "graphql_client_generator.cli.generate"
+            "graphql_client_generator.cli.generate_from_file"
         ) as mock_generate:
             mock_generate.return_value = output_dir / "minimal"
             main([str(minimal_schema_path), "-o", str(output_dir)])
@@ -101,7 +101,7 @@ class TestCLI:
         output_dir = tmp_path / "output"
         output_dir.mkdir()
         with patch(
-            "graphql_client_generator.cli.generate"
+            "graphql_client_generator.cli.generate_from_file"
         ) as mock_generate:
             mock_generate.return_value = output_dir / "my_pkg"
             main([
@@ -114,3 +114,80 @@ class TestCLI:
                 "my_pkg",
                 output_dir,
             )
+
+
+class TestCLIEndpoint:
+    """Tests for the URL-based introspection code path."""
+
+    def test_url_calls_fetch_and_generate_from_text(self, tmp_path: Path):
+        """When given an http URL, fetch_schema_sdl + generate_from_text should be called."""
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        with (
+            patch("graphql_client_generator.cli.fetch_schema_sdl", return_value="type Query { ping: String }") as mock_fetch,
+            patch("graphql_client_generator.cli.generate_from_text", return_value=output_dir / "client") as mock_gen,
+        ):
+            main(["https://api.example.com/graphql", "-n", "my_client", "-o", str(output_dir)])
+        mock_fetch.assert_called_once_with("https://api.example.com/graphql", headers=None)
+        mock_gen.assert_called_once_with("type Query { ping: String }", "my_client", output_dir)
+
+    def test_url_default_name_is_client(self, tmp_path: Path):
+        """When no --name is given for a URL, package name defaults to 'client'."""
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        with (
+            patch("graphql_client_generator.cli.fetch_schema_sdl", return_value="type Query { ping: String }"),
+            patch("graphql_client_generator.cli.generate_from_text", return_value=output_dir / "client") as mock_gen,
+        ):
+            main(["https://api.example.com/graphql", "-o", str(output_dir)])
+        assert mock_gen.call_args[0][1] == "client"
+
+    def test_header_flag_parsed_and_forwarded(self, tmp_path: Path):
+        """--header values should be forwarded as a dict to fetch_schema_sdl."""
+        output_dir = tmp_path / "out"
+        output_dir.mkdir()
+        with (
+            patch("graphql_client_generator.cli.fetch_schema_sdl", return_value="type Query { ping: String }") as mock_fetch,
+            patch("graphql_client_generator.cli.generate_from_text", return_value=output_dir / "client"),
+        ):
+            main([
+                "https://api.example.com/graphql",
+                "-H", "Authorization: Bearer tok",
+                "-H", "X-Tenant: acme",
+                "-o", str(output_dir),
+            ])
+        _, kwargs = mock_fetch.call_args
+        assert kwargs["headers"] == {"Authorization": "Bearer tok", "X-Tenant": "acme"}
+
+    def test_fetch_error_exits_with_code_1(self, tmp_path: Path, capsys):
+        """A RuntimeError from fetch_schema_sdl should print and exit 1."""
+        with patch(
+            "graphql_client_generator.cli.fetch_schema_sdl",
+            side_effect=RuntimeError("connection refused"),
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                main(["https://api.example.com/graphql"])
+        assert exc_info.value.code == 1
+        assert "connection refused" in capsys.readouterr().err
+
+
+class TestParseHeaders:
+    def test_malformed_header_is_warned_and_skipped(self, capsys):
+        """A header string without ':' should emit a warning and be skipped."""
+        from graphql_client_generator.cli import _parse_headers
+        result = _parse_headers(["BadHeader"])
+        assert result == {}
+        assert "BadHeader" in capsys.readouterr().err
+
+
+class TestMain:
+    def test_module_entry_point(self):
+        """python -m graphql_client_generator --help should exit 0."""
+        import subprocess
+        import sys
+        result = subprocess.run(
+            [sys.executable, "-m", "graphql_client_generator", "--help"],
+            capture_output=True,
+        )
+        assert result.returncode == 0
+
