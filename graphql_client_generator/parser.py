@@ -103,37 +103,6 @@ class SchemaInfo:
     query_type: TypeInfo | None = None
     mutation_type: TypeInfo | None = None
 
-    # --- helper used by runtime lazy-loading ---
-
-    # Maps type_name -> { field_name -> FieldInfo }
-    _type_fields: dict[str, dict[str, FieldInfo]] = field(default_factory=dict, repr=False)
-
-    def get_scalar_fields_for(self, field_name: str) -> list[str]:
-        """Given a *field_name*, try to determine the target type and return
-        its scalar field names.  Returns [] if unknown."""
-        # This is a best-effort lookup used by lazy loading.
-        # Walk all types to find a field with this graphql name.
-        for type_info in self.types:
-            for fi in type_info.fields:
-                if fi.name == field_name:
-                    target_type = _unwrap_type_name(fi.graphql_type)
-                    return self._scalar_fields_of(target_type)
-        for iface in self.interfaces:
-            for fi in iface.fields:
-                if fi.name == field_name:
-                    target_type = _unwrap_type_name(fi.graphql_type)
-                    return self._scalar_fields_of(target_type)
-        return []
-
-    def _scalar_fields_of(self, type_name: str) -> list[str]:
-        if type_name in self._type_fields:
-            return [
-                fi.name
-                for fi in self._type_fields[type_name].values()
-                if _is_scalar_python_type(fi.python_type)
-            ]
-        return []
-
 
 # ---------------------------------------------------------------------------
 # Parser
@@ -197,11 +166,7 @@ def parse_schema(path: str | Path) -> SchemaInfo:
             else:
                 info.types.append(type_info)
 
-    # Build the lookup index.
-    for t in info.types:
-        info._type_fields[t.name] = {f.name: f for f in t.fields}
-    for iface in info.interfaces:
-        info._type_fields[iface.name] = {f.name: f for f in iface.fields}
+
 
     return info
 
@@ -342,18 +307,6 @@ def _is_list_type(gql_type: Any) -> bool:
     if isinstance(gql_type, GraphQLNonNull):
         return _is_list_type(gql_type.of_type)
     return isinstance(gql_type, GraphQLList)
-
-
-def _unwrap_type_name(graphql_type_str: str) -> str:
-    """Extract the base type name from a GraphQL type string like ``[Foo!]!``."""
-    s = graphql_type_str.replace("!", "").replace("[", "").replace("]", "")
-    return s.strip()
-
-
-def _is_scalar_python_type(python_type: str) -> bool:
-    """Return True if *python_type* looks like a scalar (str, int, float, bool, Any)."""
-    base = python_type.replace(" | None", "").strip()
-    return base in {"str", "int", "float", "bool", "Any"}
 
 
 def _detect_one_of_inputs(schema_text: str) -> set[str]:

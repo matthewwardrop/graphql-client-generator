@@ -35,7 +35,6 @@ class QueryContext:
     operation_name: str | None = None
     path: list[PathSegment] = field(default_factory=list)
     operation_type: str = "query"  # "query" or "mutation"
-    schema_info: Any = None  # SchemaInfo for the generated package
 
 
 class graphql_field:
@@ -152,7 +151,6 @@ class GraphQLModel:
                 operation_name=self._context.operation_name,
                 path=list(self._context.path),  # will be extended by caller if needed
                 operation_type=self._context.operation_type,
-                schema_info=self._context.schema_info,
             )
         return cls(data, child_context)
 
@@ -168,11 +166,13 @@ class GraphQLModel:
                 f"Cannot lazy-load '{attr_name}': no client context available"
             )
 
+        sub_fields = self._resolve_subfields(graphql_name)
+
         new_query = add_field_to_query(
             ctx.query_string,
             ctx.path,
             graphql_name,
-            ctx.schema_info,
+            sub_fields,
         )
 
         response_data = ctx.client._execute_raw(
@@ -198,6 +198,28 @@ class GraphQLModel:
         # Cache in _data so the next descriptor access hits the fast path.
         self._data[graphql_name] = raw_value
         return self._coerce_value(attr_name, graphql_name, raw_value)
+
+    def _resolve_subfields(self, graphql_name: str) -> list[str]:
+        """Resolve the target type of *graphql_name* and return its scalar
+        sub-field names. Returns ``[]`` if the field is a scalar type."""
+        # Find the descriptor for this field on the current class.
+        for klass in type(self).__mro__:
+            for val in klass.__dict__.values():
+                if isinstance(val, graphql_field) and val.graphql_name == graphql_name:
+                    target_type = _unwrap_type_name(val.graphql_type)
+                    target_cls = self.__type_registry__.get(target_type)
+                    if target_cls is None:
+                        return []  # scalar type, no sub-selection needed
+                    # Collect scalar field names from the target class.
+                    result: list[str] = []
+                    for tc in target_cls.__mro__:
+                        for tv in tc.__dict__.values():
+                            if isinstance(tv, graphql_field):
+                                inner = _unwrap_type_name(tv.graphql_type)
+                                if self.__type_registry__.get(inner) is None:
+                                    result.append(tv.graphql_name)
+                    return result
+        return []
 
     # -- serialization ---------------------------------------------------------
 
@@ -244,6 +266,11 @@ class GraphQLModel:
 
     def __hash__(self) -> int:
         return id(self)
+
+
+def _unwrap_type_name(graphql_type: str) -> str:
+    """Extract the base type name from a GraphQL type string like ``[Foo!]!``."""
+    return graphql_type.replace("!", "").replace("[", "").replace("]", "").strip()
 
 
 def _serialize_value(value: Any) -> Any:
