@@ -29,7 +29,6 @@ class GraphQLClientBase:
 
     # Populated by generated subclasses with the package's type registry.
     _type_registry: dict[str, type[GraphQLModel]] = {}
-    _schema_info: Any = None  # set by generated code for lazy-load field expansion
 
     def __init__(
         self,
@@ -119,7 +118,6 @@ class GraphQLClientBase:
             operation_name=operation_name,
             path=[],
             operation_type=operation_type,
-            schema_info=self._schema_info,
         )
         cls = result_cls or _ResultRoot
         return cls(data, root_context, self._type_registry)
@@ -181,7 +179,6 @@ class _ResultRoot(GraphQLModel):
             operation_name=self._context.operation_name,
             path=child_path,
             operation_type=self._context.operation_type,
-            schema_info=self._context.schema_info,
         )
         obj = cls(data, child_context)
         # Give the child access to the type registry for nested coercion.

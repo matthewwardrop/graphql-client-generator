@@ -85,7 +85,7 @@ def add_field_to_query(
     query: str,
     path: list[PathSegment],
     field_name: str,
-    schema_info: Any = None,
+    sub_fields: list[str] | None = None,
 ) -> str:
     """Return a modified version of *query* that also selects *field_name*
     at the position described by *path*.
@@ -100,12 +100,11 @@ def add_field_to_query(
 
         { book(id: 1) { title author { __typename ... } } }
 
-    If the target field is a scalar (determined via *schema_info*), we just add
-    the bare field name.  If it's an object type, we add ``__typename`` plus
-    all scalar sub-fields.
+    If *sub_fields* is non-empty the field is composite and we add
+    ``__typename`` plus those sub-fields.  Otherwise we add the bare name.
     """
     doc = gql_parse(query)
-    doc = _add_field_to_doc(doc, path, field_name, schema_info)
+    doc = _add_field_to_doc(doc, path, field_name, sub_fields or [])
     return print_ast(doc)
 
 
@@ -113,12 +112,14 @@ def _add_field_to_doc(
     doc: DocumentNode,
     path: list[PathSegment],
     field_name: str,
-    schema_info: Any,
+    sub_fields: list[str],
 ) -> DocumentNode:
     new_definitions = []
     for defn in doc.definitions:
         if isinstance(defn, OperationDefinitionNode) and defn.selection_set:
-            new_ss = _add_field_at_path(defn.selection_set, list(path), field_name, schema_info)
+            new_ss = _add_field_at_path(
+                defn.selection_set, list(path), field_name, sub_fields,
+            )
             defn = OperationDefinitionNode(
                 operation=defn.operation,
                 name=defn.name,
@@ -134,13 +135,12 @@ def _add_field_at_path(
     ss: SelectionSetNode,
     path: list[PathSegment],
     field_name: str,
-    schema_info: Any,
+    sub_fields: list[str],
 ) -> SelectionSetNode:
     """Walk the selection set along *path*, then add *field_name* to the
     deepest selection set."""
     if not path:
-        # We're at the target depth -- add the field here.
-        return _add_field_to_selection_set(ss, field_name, schema_info)
+        return _add_field_to_selection_set(ss, field_name, sub_fields)
 
     segment = path[0]
     remaining = path[1:]
@@ -148,10 +148,11 @@ def _add_field_at_path(
     new_selections: list[Any] = []
     for sel in ss.selections:
         if isinstance(sel, FieldNode):
-            # Match by alias first, then by name.
             sel_name = sel.alias.value if sel.alias else sel.name.value
             if sel_name == segment.field_name and sel.selection_set:
-                child_ss = _add_field_at_path(sel.selection_set, remaining, field_name, schema_info)
+                child_ss = _add_field_at_path(
+                    sel.selection_set, remaining, field_name, sub_fields,
+                )
                 sel = FieldNode(
                     alias=sel.alias,
                     name=sel.name,
@@ -167,17 +168,13 @@ def _add_field_at_path(
 def _add_field_to_selection_set(
     ss: SelectionSetNode,
     field_name: str,
-    schema_info: Any,
+    sub_fields: list[str],
 ) -> SelectionSetNode:
     """Add *field_name* to the selection set if not already present."""
-    # Check if already selected.
     for sel in ss.selections:
         if isinstance(sel, FieldNode) and sel.name.value == field_name:
             return ss  # already there
 
-    # Build the new field node.  If schema_info tells us this field is an
-    # object type, add a sub-selection with __typename + all scalar fields.
-    sub_fields = _get_scalar_subfields(field_name, schema_info)
     if sub_fields:
         child_selections = [_TYPENAME_FIELD] + [
             FieldNode(name=NameNode(value=sf)) for sf in sub_fields
@@ -190,15 +187,3 @@ def _add_field_to_selection_set(
         new_field = FieldNode(name=NameNode(value=field_name))
 
     return SelectionSetNode(selections=tuple(list(ss.selections) + [new_field]))
-
-
-def _get_scalar_subfields(field_name: str, schema_info: Any) -> list[str]:
-    """If schema_info knows about *field_name* and it's a composite type,
-    return its scalar field names.  Otherwise return []."""
-    if schema_info is None:
-        return []
-    # schema_info is expected to have a method or attribute for this.
-    get = getattr(schema_info, "get_scalar_fields_for", None)
-    if get is not None:
-        return get(field_name)
-    return []
