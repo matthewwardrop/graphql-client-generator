@@ -432,3 +432,104 @@ class TestGeneratePyproject:
     def test_description_includes_name(self):
         code = generate_pyproject("my_cool_client")
         assert "my_cool_client" in code
+
+
+# ---------------------------------------------------------------------------
+# Multiline descriptions
+# ---------------------------------------------------------------------------
+
+MULTILINE_SCHEMA = """\
+type Query { ping: String }
+
+type Status {
+  id: ID!
+}
+
+enum Priority {
+  HIGH
+  LOW
+}
+
+input CreateInput {
+  name: String!
+}
+
+union Result = Status
+"""
+
+MULTILINE_DESC = "First line.\nWhen creating: required.\nSee `docs` for details."
+MULTILINE_CLASS_DESC = "Short summary.\nLonger explanation here.\nFinal note."
+
+
+class TestMultilineDescriptions:
+    def _make_input_schema(self, field_desc: str = "", class_desc: str = "") -> SchemaInfo:
+        return SchemaInfo(inputs=[InputInfo(
+            name="MyInput",
+            description=class_desc,
+            fields=[FieldInfo(
+                name="id", graphql_type="Int", python_type="int | None",
+                description=field_desc,
+            )],
+        )])
+
+    def test_multiline_field_comment_all_lines_prefixed(self):
+        schema = self._make_input_schema(field_desc=MULTILINE_DESC)
+        code = generate_inputs(schema)
+        assert "    # First line." in code
+        assert "    # When creating: required." in code
+        assert "    # See `docs` for details." in code
+
+    def test_multiline_field_comment_no_bare_continuation(self):
+        schema = self._make_input_schema(field_desc=MULTILINE_DESC)
+        code = generate_inputs(schema)
+        # No line should start with non-comment, non-indent content mid-description
+        compile(code, "<generated>", "exec")  # must not raise SyntaxError
+
+    def test_multiline_input_class_docstring(self):
+        schema = self._make_input_schema(class_desc=MULTILINE_CLASS_DESC)
+        code = generate_inputs(schema)
+        assert '    """' in code
+        assert "    Short summary." in code
+        assert "    Longer explanation here." in code
+        assert "    Final note." in code
+        compile(code, "<generated>", "exec")
+
+    def test_multiline_enum_docstring(self):
+        schema = SchemaInfo(enums=[
+            EnumInfo(name="Color", values=["RED"], description=MULTILINE_CLASS_DESC)
+        ])
+        code = generate_enums(schema)
+        assert "    Short summary." in code
+        assert "    Longer explanation here." in code
+        compile(code, "<generated>", "exec")
+
+    def test_multiline_model_class_docstring(self):
+        schema = SchemaInfo(
+            types=[TypeInfo(name="Widget", description=MULTILINE_CLASS_DESC, fields=[])],
+            query_type=TypeInfo(name="Query", fields=[]),
+        )
+        code = generate_models(schema, "TestSchema")
+        assert "    Short summary." in code
+        assert "    Longer explanation here." in code
+        compile(code, "<generated>", "exec")
+
+    def test_multiline_union_comment(self):
+        schema = SchemaInfo(
+            types=[TypeInfo(name="A", fields=[]), TypeInfo(name="B", fields=[])],
+            unions=[UnionInfo(name="AB", member_types=["A", "B"], description=MULTILINE_DESC)],
+            query_type=TypeInfo(name="Query", fields=[]),
+        )
+        code = generate_models(schema, "TestSchema")
+        assert "# First line." in code
+        assert "# When creating: required." in code
+        compile(code, "<generated>", "exec")
+
+    def test_single_line_description_unchanged(self):
+        schema = self._make_input_schema(class_desc="Single line.")
+        code = generate_inputs(schema)
+        assert '"""Single line."""' in code
+
+    def test_backtick_in_field_description_no_syntax_error(self):
+        schema = self._make_input_schema(field_desc="Must be `null` when absent.")
+        code = generate_inputs(schema)
+        compile(code, "<generated>", "exec")

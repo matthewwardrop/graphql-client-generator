@@ -36,7 +36,7 @@ def _generate_input(inp: InputInfo, enum_names: set[str]) -> list[str]:
     lines.append("@dataclass")
     lines.append(f"class {inp.name}:")
     if inp.description:
-        lines.append(f'    """{_escape_docstring(inp.description)}"""')
+        lines.extend(_format_docstring(inp.description, 4))
     if inp.is_one_of:
         lines.append("    # @oneOf: exactly one field must be provided.")
     lines.append("")
@@ -56,7 +56,7 @@ def _generate_input(inp: InputInfo, enum_names: set[str]) -> list[str]:
         py_type = _input_python_type(f.python_type)
         comment = f"  # {f.graphql_type}" if f.graphql_type else ""
         if f.description:
-            lines.append(f"    # {f.description}")
+            lines.extend(_format_comment(f.description, 4))
         lines.append(
             f"    {py_name}: {py_type}{comment}"
         )
@@ -66,7 +66,7 @@ def _generate_input(inp: InputInfo, enum_names: set[str]) -> list[str]:
         py_type = _input_python_type(f.python_type)
         comment = f"  # {f.graphql_type}" if f.graphql_type else ""
         if f.description:
-            lines.append(f"    # {f.description}")
+            lines.extend(_format_comment(f.description, 4))
         lines.append(
             f"    {py_name}: {py_type} = None{comment}"
         )
@@ -110,5 +110,25 @@ def _input_python_type(python_type: str) -> str:
     return python_type
 
 
-def _escape_docstring(s: str) -> str:
-    return s.replace('"""', r'\"\"\"')
+def _format_docstring(description: str, indent: int) -> list[str]:
+    """Return a properly indented triple-quoted docstring for *description*."""
+    pad = " " * indent
+    escaped = description.replace('"""', r'\"\"\"')
+    raw = escaped.splitlines()
+    if len(raw) == 1:
+        return [f'{pad}"""{escaped}"""']
+    result = [f'{pad}"""']
+    for line in raw:
+        stripped = line.strip()
+        result.append(f"{pad}{stripped}" if stripped else "")
+    result.append(f'{pad}"""')
+    return result
+
+
+def _format_comment(description: str, indent: int) -> list[str]:
+    """Return each line of *description* as a ``# `` comment."""
+    pad = " " * indent
+    return [
+        f"{pad}# {line}" if line.strip() else f"{pad}#"
+        for line in description.splitlines()
+    ]
