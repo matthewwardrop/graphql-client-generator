@@ -219,6 +219,56 @@ class TestFieldSelectorCall:
         assert isinstance(result._args["id"], VariableRef)
         assert result._args["id"].name == "userId"
 
+    def test_missing_required_arg_raises(self):
+        sel = FieldSelector("user", arg_types={"id": "ID!", "name": "String"})
+        with pytest.raises(TypeError, match="Missing required argument.*'user': id"):
+            sel(name="Alice")
+
+    def test_missing_multiple_required_args(self):
+        sel = FieldSelector(
+            "create", arg_types={"a": "Int!", "b": "String!", "c": "Float"},
+        )
+        with pytest.raises(TypeError, match="Missing required argument.*'create': a, b"):
+            sel(c=1.0)
+
+    def test_optional_arg_not_required(self):
+        sel = FieldSelector("users", arg_types={"limit": "Int", "offset": "Int"})
+        result = sel()  # no required args, should succeed
+        assert result._args == {}
+
+    def test_required_arg_provided_passes(self):
+        sel = FieldSelector("user", arg_types={"id": "ID!"})
+        result = sel(id="123")
+        assert result._args == {"id": "123"}
+
+
+class TestFieldSelectorSignature:
+    def test_signature_set_when_arg_types(self):
+        import inspect
+        sel = FieldSelector("book", arg_types={"id": "ID!", "title": "String"})
+        sig = inspect.signature(sel)
+        params = list(sig.parameters.values())
+        assert len(params) == 2
+        assert params[0].name == "id"
+        assert params[0].annotation == "ID!"
+        assert params[0].kind == inspect.Parameter.KEYWORD_ONLY
+        assert params[1].name == "title"
+        assert params[1].annotation == "String"
+        assert sig.return_annotation is FieldSelector
+
+    def test_no_signature_when_no_args(self):
+        sel = FieldSelector("name")
+        assert not hasattr(sel, "__signature__")
+
+    def test_doc_set_when_arg_types(self):
+        sel = FieldSelector("book", arg_types={"id": "ID!", "limit": "Int"})
+        assert sel.__doc__ == "book(id: ID!, limit: Int)"
+
+    def test_doc_not_overridden_when_no_args(self):
+        sel = FieldSelector("name")
+        # Should have the class-level docstring, not a custom one
+        assert "field selection" in sel.__doc__.lower()
+
 
 class TestFieldSelectorGetitem:
     def test_single_selection(self):
@@ -240,6 +290,27 @@ class TestFieldSelectorGetitem:
         parent = FieldSelector("user", target_cls=lambda: User)
         _ = parent[FieldSelector("name")]
         assert parent._sub_selections == []
+
+    def test_getitem_missing_required_args_raises(self):
+        sel = FieldSelector("user", arg_types={"id": "ID!", "name": "String"})
+        with pytest.raises(TypeError, match="Missing required argument.*'user': id"):
+            sel[FieldSelector("name")]
+
+    def test_getitem_after_call_with_required_args_passes(self):
+        sel = FieldSelector("user", arg_types={"id": "ID!"})
+        result = sel(id="123")[FieldSelector("name")]
+        assert result._args == {"id": "123"}
+        assert len(result._sub_selections) == 1
+
+    def test_getitem_no_required_args_passes(self):
+        sel = FieldSelector("users", arg_types={"limit": "Int"})
+        result = sel[FieldSelector("name")]
+        assert len(result._sub_selections) == 1
+
+    def test_getitem_no_arg_types_passes(self):
+        sel = FieldSelector("name")
+        result = sel[FieldSelector("sub")]
+        assert len(result._sub_selections) == 1
 
 
 class TestFieldSelectorAlias:

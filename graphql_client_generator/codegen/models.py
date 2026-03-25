@@ -156,7 +156,7 @@ def _generate_schema_class(
 
     lines.append("")
     lines.append(f"class _{schema_class_name}:")
-    lines.append('    """Root query fields.  Call to build a complete query."""')
+    lines.append('    """Root query fields.  Use ``Schema[...]`` to build a query."""')
     lines.append("")
 
     # Query root fields.
@@ -165,10 +165,7 @@ def _generate_schema_class(
             lines.append(_generate_schema_field(f, composite_names, indent=4))
         lines.append("")
 
-    # __call__ and __getitem__ to build a BuiltQuery.
-    lines.append("    def __call__(self, *selections, **aliases):")
-    lines.append('        return BuiltQuery(list(selections), aliases, "query")')
-    lines.append("")
+    # __getitem__ to build a BuiltQuery.
     lines.append("    def __getitem__(self, selections):")
     lines.append("        if not isinstance(selections, tuple):")
     lines.append("            selections = (selections,)")
@@ -178,13 +175,10 @@ def _generate_schema_class(
     # Mutation sub-namespace.
     if schema.mutation_type and schema.mutation_type.fields:
         lines.append("    class mutate:")
-        lines.append('        """Mutation root fields.  Call to build a mutation."""')
+        lines.append('        """Mutation root fields.  Use ``Schema.mutate[...]``."""')
         lines.append("")
         for f in schema.mutation_type.fields:
             lines.append(_generate_schema_field(f, composite_names, indent=8))
-        lines.append("")
-        lines.append("        def __call__(self, *selections, **aliases):")
-        lines.append('            return BuiltQuery(list(selections), aliases, "mutation")')
         lines.append("")
         lines.append("        def __getitem__(self, selections):")
         lines.append("            if not isinstance(selections, tuple):")

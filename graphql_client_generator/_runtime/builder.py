@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 
@@ -75,6 +76,24 @@ class FieldSelector:
         self._sub_selections: list[FieldSelector] = []
         self._alias: str | None = None
 
+        # Build a proper __signature__ so notebooks show typed parameters.
+        if self._arg_types:
+            params = [
+                inspect.Parameter(
+                    name,
+                    inspect.Parameter.KEYWORD_ONLY,
+                    annotation=gql_type,
+                )
+                for name, gql_type in self._arg_types.items()
+            ]
+            self.__signature__ = inspect.Signature(
+                params, return_annotation=FieldSelector,
+            )
+            arg_sig = ", ".join(
+                f"{n}: {t}" for n, t in self._arg_types.items()
+            )
+            self.__doc__ = f"{graphql_name}({arg_sig})"
+
     def _clone(self) -> FieldSelector:
         node = FieldSelector(
             self._graphql_name, self._target_cls,
@@ -104,6 +123,17 @@ class FieldSelector:
                     f"'{self._graphql_name}'. "
                     f"Valid arguments: {', '.join(self._arg_types)}"
                 )
+        # Check that all required arguments (non-null types ending with !)
+        # are provided.
+        missing = [
+            name for name, gql_type in self._arg_types.items()
+            if gql_type.endswith("!") and name not in kwargs
+        ]
+        if missing:
+            raise TypeError(
+                f"Missing required argument(s) for field "
+                f"'{self._graphql_name}': {', '.join(missing)}"
+            )
         node = self._clone()
         node._args = dict(kwargs)
         return node
@@ -113,7 +143,22 @@ class FieldSelector:
     def __getitem__(
         self, selections: FieldSelector | tuple[FieldSelector, ...],
     ) -> FieldSelector:
-        """Set sub-field selections."""
+        """Set sub-field selections.
+
+        Raises ``TypeError`` if required arguments have not been provided
+        via ``__call__`` first.
+        """
+        # Validate required args before allowing sub-selections.
+        missing = [
+            name for name, gql_type in self._arg_types.items()
+            if gql_type.endswith("!") and name not in self._args
+        ]
+        if missing:
+            raise TypeError(
+                f"Missing required argument(s) for field "
+                f"'{self._graphql_name}': {', '.join(missing)}. "
+                f"Call the field with arguments before selecting sub-fields."
+            )
         if not isinstance(selections, tuple):
             selections = (selections,)
         node = self._clone()
