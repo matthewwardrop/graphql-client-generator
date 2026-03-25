@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from ..parser import SchemaInfo
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..parser import SchemaInfo
 
 
 def generate_init(
     schema: SchemaInfo,
     package_name: str,
     client_class_name: str,
+    schema_class_name: str,
 ) -> str:
     """Return the contents of ``__init__.py`` for the generated package."""
     lines = [
@@ -18,8 +22,9 @@ def generate_init(
         "from .models import *  # noqa: F401,F403",
         "from .enums import *  # noqa: F401,F403",
         "from .inputs import *  # noqa: F401,F403",
+        "from ._runtime.builder import Variable",
         "",
-        f"__all__ = [{client_class_name!r}]",
+        f"__all__ = [{client_class_name!r}, {schema_class_name!r}, 'Variable']",
         "",
     ]
     return "\n".join(lines)

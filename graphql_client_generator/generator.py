@@ -30,8 +30,10 @@ def generate(
     # Parse the schema.
     schema = parse_schema(schema_path)
 
-    # Derive client class name: snake_case package name -> PascalCase + "Client"
-    client_class_name = _to_pascal_case(package_name) + "Client"
+    # Derive class names from the package name.
+    pascal = _to_pascal_case(package_name)
+    client_class_name = pascal + "Client"
+    schema_class_name = pascal + "Schema"
 
     # Create the package directory.
     package_dir.mkdir(parents=True, exist_ok=True)
@@ -46,9 +48,12 @@ def generate(
     # Generate files.
     _write(package_dir / "enums.py", generate_enums(schema))
     _write(package_dir / "inputs.py", generate_inputs(schema))
-    _write(package_dir / "models.py", generate_models(schema))
+    _write(package_dir / "models.py", generate_models(schema, schema_class_name))
     _write(package_dir / "client.py", generate_client(schema, client_class_name))
-    _write(package_dir / "__init__.py", generate_init(schema, package_name, client_class_name))
+    _write(
+        package_dir / "__init__.py",
+        generate_init(schema, package_name, client_class_name, schema_class_name),
+    )
     _write(package_dir / "pyproject.toml", generate_pyproject(package_name))
 
     return package_dir
