@@ -44,7 +44,16 @@ def generate_from_text(
     Returns the path to the generated directory.
     """
     output_dir = Path(output_dir)
-    package_dir = output_dir / package_name
+    # Normalise: distribution name uses hyphens, Python module name uses underscores.
+    dist_name = package_name.replace("_", "-")
+    python_name = package_name.replace("-", "_")
+
+    if as_package:
+        project_dir = output_dir / dist_name
+        module_dir = project_dir / python_name
+    else:
+        project_dir = output_dir / python_name
+        module_dir = project_dir
 
     # Parse the schema.
     schema = parse_schema_from_text(schema_text)
@@ -54,29 +63,29 @@ def generate_from_text(
     client_class_name = pascal + "Client"
     schema_class_name = pascal + "Schema"
 
-    # Create the package directory.
-    package_dir.mkdir(parents=True, exist_ok=True)
+    # Create the module directory (and any parents).
+    module_dir.mkdir(parents=True, exist_ok=True)
 
-    # Copy _runtime/ into the generated package.
+    # Copy _runtime/ into the module directory.
     runtime_src = Path(__file__).parent / "_runtime"
-    runtime_dst = package_dir / "_runtime"
+    runtime_dst = module_dir / "_runtime"
     if runtime_dst.exists():
         shutil.rmtree(runtime_dst)
     shutil.copytree(runtime_src, runtime_dst)
 
-    # Generate files.
-    _write(package_dir / "enums.py", generate_enums(schema))
-    _write(package_dir / "inputs.py", generate_inputs(schema))
-    _write(package_dir / "models.py", generate_models(schema, schema_class_name))
-    _write(package_dir / "client.py", generate_client(schema, client_class_name))
+    # Generate Python source files.
+    _write(module_dir / "enums.py", generate_enums(schema))
+    _write(module_dir / "inputs.py", generate_inputs(schema))
+    _write(module_dir / "models.py", generate_models(schema, schema_class_name))
+    _write(module_dir / "client.py", generate_client(schema, client_class_name))
     _write(
-        package_dir / "__init__.py",
-        generate_init(schema, package_name, client_class_name, schema_class_name),
+        module_dir / "__init__.py",
+        generate_init(schema, python_name, client_class_name, schema_class_name),
     )
     if as_package:
-        _write(package_dir / "pyproject.toml", generate_pyproject(package_name))
+        _write(project_dir / "pyproject.toml", generate_pyproject(dist_name))
 
-    return package_dir
+    return project_dir
 
 
 def _write(path: Path, content: str) -> None:

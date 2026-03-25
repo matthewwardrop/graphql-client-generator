@@ -358,20 +358,24 @@ result = client.mutate(
 ## Generated Package Structure
 
 ```
-bookstore/
-  __init__.py          # Exports client, schema, models, Variable
-  client.py            # BookstoreClient class
-  models.py            # Schema types, TYPE_REGISTRY, BookstoreSchema
-  enums.py             # Python Enum classes
-  inputs.py            # @dataclass input types with to_dict()
-  pyproject.toml       # Package metadata
-  _runtime/            # Standalone runtime library
-    builder.py         # Query builder (Variable, FieldSelector, SchemaField)
-    model.py           # GraphQLResponse, lazy loading
-    client.py          # GraphQLClientBase, HTTP transport
-    query.py           # __typename insertion, query modification
-    serialization.py   # Case conversion, input serialization
+bookstore/                   # Project root (dist name, hyphens)
+  bookstore/                 # Python module (import name, underscores)
+    __init__.py              # Exports client, schema, models, Variable
+    client.py                # BookstoreClient class
+    models.py                # Schema types, TYPE_REGISTRY, BookstoreSchema
+    enums.py                 # Python Enum classes
+    inputs.py                # @dataclass input types with to_dict()
+    _runtime/                # Standalone runtime library
+      builder.py             # Query builder (Variable, FieldSelector, SchemaField)
+      model.py               # GraphQLResponse, lazy loading
+      client.py              # GraphQLClientBase, HTTP transport
+      query.py               # __typename insertion, query modification
+      serialization.py       # Case conversion, input serialization
+  pyproject.toml             # Package metadata
 ```
+
+With `--module` the `pyproject.toml` is omitted and the source files are written
+directly into `bookstore/` (no nesting), ready to drop into an existing package.
 
 ## Schema Support
 
