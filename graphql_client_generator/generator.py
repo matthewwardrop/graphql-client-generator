@@ -70,8 +70,8 @@ def generate_from_text(
     # Derive class names from the package name.
     pascal = _to_pascal_case(package_name)
     client_class_name = pascal + "Client"
-    schema_class_name = pascal + "Schema"
-    mutation_class_name = pascal + "MutationSchema" if schema.mutation_type else ""
+    schema_class_name = pascal + "Query"
+    mutation_class_name = pascal + "Mutation" if schema.mutation_type else ""
 
     # Create the module directory (and any parents).
     module_dir.mkdir(parents=True, exist_ok=True)

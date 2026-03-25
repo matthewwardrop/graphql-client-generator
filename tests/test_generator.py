@@ -78,8 +78,8 @@ class TestGenerate:
         assert "class TestClientClient(" in client_code
 
         schema_code = (module / "schema.py").read_text()
-        assert "TestClientSchema = _TestClientSchema()" in schema_code
-        assert "TestClientMutationSchema = _TestClientMutationSchema()" in schema_code
+        assert "TestClientQuery = _TestClientQuery()" in schema_code
+        assert "TestClientMutation = _TestClientMutation()" in schema_code
 
     def test_enums_file_content(self, tmp_path: Path, minimal_schema_path: Path):
         pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path)
@@ -111,7 +111,7 @@ class TestGenerate:
     def test_init_imports_mutation(self, tmp_path: Path, minimal_schema_path: Path):
         pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path)
         code = (pkg / "test_client" / "__init__.py").read_text()
-        assert "TestClientMutationSchema" in code
+        assert "TestClientMutation" in code
 
     def test_no_mutation_for_empty_schema(self, tmp_path: Path, empty_schema_path: Path):
         pkg = generate_from_file(empty_schema_path, "test_client", tmp_path)
