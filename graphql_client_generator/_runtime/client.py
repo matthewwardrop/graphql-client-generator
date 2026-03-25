@@ -10,7 +10,14 @@ try:
 except ImportError:
     requests = None  # type: ignore[assignment]
 
-from .model import GraphQLModel, PathSegment, QueryContext
+from .model import (
+    GraphQLModel,
+    GraphQLResponse,
+    QueryContext,
+    _coerce_response_value,
+    _format_response,
+    _serialize_value,
+)
 from .query import ensure_typenames
 
 
@@ -47,7 +54,7 @@ class GraphQLClientBase:
         query: str,
         variables: dict[str, Any] | None = None,
         operation_name: str | None = None,
-    ) -> GraphQLModel:
+    ) -> _ResultRoot:
         """Execute a GraphQL **query** and return a typed result tree."""
         return self._execute(query, variables, operation_name, operation_type="query")
 
@@ -56,7 +63,7 @@ class GraphQLClientBase:
         mutation: str,
         variables: dict[str, Any] | None = None,
         operation_name: str | None = None,
-    ) -> GraphQLModel:
+    ) -> _ResultRoot:
         """Execute a GraphQL **mutation** and return a typed result tree."""
         return self._execute(mutation, variables, operation_name, operation_type="mutation")
 
@@ -69,7 +76,7 @@ class GraphQLClientBase:
         operation_name: str | None,
         operation_type: str,
         result_cls: type[_ResultRoot] | None = None,
-    ) -> GraphQLModel:
+    ) -> _ResultRoot:
         """Parse, enhance, execute, and convert a GraphQL operation."""
         enhanced_query = ensure_typenames(query)
         data = self._execute_raw(enhanced_query, variables, operation_name)
@@ -109,8 +116,8 @@ class GraphQLClientBase:
         operation_name: str | None,
         operation_type: str,
         result_cls: type[_ResultRoot] | None = None,
-    ) -> GraphQLModel:
-        """Convert raw response data into a tree of ``GraphQLModel`` instances."""
+    ) -> _ResultRoot:
+        """Convert raw response data into a tree of result objects."""
         root_context = QueryContext(
             client=self,
             query_string=query_string,
@@ -123,9 +130,10 @@ class GraphQLClientBase:
         return cls(data, root_context, self._type_registry)
 
 
-class _ResultRoot(GraphQLModel):
+class _ResultRoot:
     """Wrapper around the top-level ``data`` dict returned by a GraphQL
-    operation.  Each top-level key becomes an attribute."""
+    operation.  Each top-level key becomes an attribute that returns a
+    ``GraphQLResponse``."""
 
     def __init__(
         self,
@@ -133,78 +141,54 @@ class _ResultRoot(GraphQLModel):
         context: QueryContext,
         type_registry: dict[str, type[GraphQLModel]],
     ) -> None:
-        super().__init__(data, context)
-        self._type_registry_local = type_registry
+        self._data = data
+        self._context = context
+        self._type_registry = type_registry
+
+        # Eagerly coerce all top-level fields.
+        for key, raw in data.items():
+            self.__dict__[key] = _coerce_response_value(
+                raw, type_registry, context, key,
+            )
 
     def __getattr__(self, name: str) -> Any:
-        # Allow accessing top-level response fields by name.
-        # Try camelCase first (GraphQL convention), then the name as-is.
-        for key in (name, _to_camel_case(name)):
-            if key in self._data:
-                raw = self._data[key]
-                value = self._coerce_top_level(key, raw)
-                # Cache for future access.
-                self.__dict__[name] = value
-                return value
+        # Try camelCase conversion for snake_case attribute access.
+        camel = _to_camel_case(name)
+        if camel in self.__dict__:
+            return self.__dict__[camel]
         raise AttributeError(f"No field '{name}' in query result")
 
-    def _coerce_top_level(self, key: str, raw: Any) -> Any:
-        """Coerce a top-level response value, attaching path context."""
-        if raw is None:
-            return None
-        if isinstance(raw, dict):
-            return self._coerce_object_with_path(key, raw)
-        if isinstance(raw, list):
-            return [
-                self._coerce_object_with_path(key, item, index=i)
-                if isinstance(item, dict) else item
-                for i, item in enumerate(raw)
-            ]
-        return raw
-
-    def _coerce_object_with_path(
-        self, key: str, data: dict[str, Any], index: int | None = None,
-    ) -> GraphQLModel:
-        """Construct a child model with correct path context."""
-        typename = data.get("__typename")
-        cls = self._type_registry_local.get(typename, GraphQLModel) if typename else GraphQLModel
-
-        child_path = list(self._context.path) + [
-            PathSegment(field_name=key, actual_name=key, index=index)
-        ]
-        child_context = QueryContext(
-            client=self._context.client,
-            query_string=self._context.query_string,
-            variables=self._context.variables,
-            operation_name=self._context.operation_name,
-            path=child_path,
-            operation_type=self._context.operation_type,
-        )
-        obj = cls(data, child_context)
-        # Give the child access to the type registry for nested coercion.
-        obj.__type_registry__ = self._type_registry_local
-        return obj
-
     def __repr__(self) -> str:
-        from .model import _format_model
-
-        saved = self.__type_registry__
-        self.__type_registry__ = self._type_registry_local
-        try:
-            return _format_model(self, indent=0)
-        finally:
-            self.__type_registry__ = saved
+        # Use coerced values from __dict__.
+        items = [
+            (k, self.__dict__[k]) for k in self._data
+            if k in self.__dict__ and self.__dict__[k] is not None
+        ]
+        if not items:
+            return "QueryResult()"
+        compact_parts = [f"{k}={_repr_top(v)}" for k, v in items]
+        compact = f"QueryResult({', '.join(compact_parts)})"
+        if len(compact) <= 80:
+            return compact
+        pad = "    "
+        lines = ["QueryResult("]
+        for k, v in items:
+            lines.append(f"{pad}{k}={_repr_top(v)},")
+        lines.append(")")
+        return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
-        return {k: _serialize(v) for k, v in self._data.items()}
+        return {k: _serialize_value(v) for k, v in self._data.items()}
 
 
-def _serialize(value: Any) -> Any:
-    if isinstance(value, GraphQLModel):
-        return value.to_dict()
+def _repr_top(value: Any) -> str:
+    """Repr a top-level value in a _ResultRoot."""
+    if isinstance(value, GraphQLResponse):
+        return _format_response(value, indent=4)
     if isinstance(value, list):
-        return [_serialize(v) for v in value]
-    return value
+        parts = [_repr_top(v) for v in value]
+        return f"[{', '.join(parts)}]"
+    return repr(value)
 
 
 def _to_camel_case(snake: str) -> str:
