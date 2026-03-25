@@ -1,14 +1,13 @@
-"""Base model and descriptor for generated GraphQL client types."""
+"""Base model, response wrapper, and lazy-loading for generated GraphQL clients."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any
 
+from .builder import SchemaField
 from .serialization import to_snake_case
-
-T = TypeVar("T", bound="GraphQLModel")
 
 
 class FieldNotLoadedError(AttributeError):
@@ -37,40 +36,12 @@ class QueryContext:
     operation_type: str = "query"  # "query" or "mutation"
 
 
-class graphql_field:
-    """Descriptor on generated model classes defining a schema field.
-
-    These descriptors are used as *metadata* by :class:`GraphQLResponse`
-    for lazy loading and sub-field resolution.  They are not accessed
-    directly on response instances.
-    """
-
-    def __init__(self, graphql_name: str, graphql_type: str = "") -> None:
-        self.graphql_name = graphql_name
-        self.graphql_type = graphql_type
-        self.attr_name: str | None = None
-
-    def __set_name__(self, owner: type, name: str) -> None:
-        self.attr_name = name
-
-    def __get__(self, obj: GraphQLModel | None, objtype: type | None = None) -> Any:
-        if obj is None:
-            return self
-        raise FieldNotLoadedError(
-            "graphql_field descriptors should not be accessed on model instances; "
-            "use GraphQLResponse for response data"
-        )
-
-    def __repr__(self) -> str:
-        return f"graphql_field({self.graphql_name!r}, graphql_type={self.graphql_type!r})"
-
-
 class GraphQLModel:
     """Base class for generated GraphQL schema types.
 
-    Subclasses declare fields via :class:`graphql_field` descriptors.
-    These classes serve as schema metadata; response data is wrapped
-    in :class:`GraphQLResponse` instead.
+    Subclasses declare fields via :class:`SchemaField` descriptors.
+    These classes serve as schema metadata and query-builder namespaces;
+    response data is wrapped in :class:`GraphQLResponse` instead.
     """
 
     __typename__: str = ""
@@ -201,19 +172,19 @@ def _child_context(
 def _find_descriptor(
     model_cls: type[GraphQLModel] | None,
     attr_name: str,
-) -> graphql_field | None:
-    """Find a ``graphql_field`` descriptor on *model_cls* matching *attr_name*."""
+) -> SchemaField | None:
+    """Find a ``SchemaField`` descriptor on *model_cls* matching *attr_name*."""
     if model_cls is None:
         return None
     for klass in model_cls.__mro__:
         desc = klass.__dict__.get(attr_name)
-        if isinstance(desc, graphql_field):
+        if isinstance(desc, SchemaField):
             return desc
     return None
 
 
 def _resolve_subfields_for(
-    desc: graphql_field,
+    desc: SchemaField,
     type_registry: dict[str, type[GraphQLModel]],
 ) -> list[str]:
     """Resolve scalar sub-field names for the target type of *desc*."""
@@ -224,7 +195,7 @@ def _resolve_subfields_for(
     result: list[str] = []
     for klass in target_cls.__mro__:
         for val in klass.__dict__.values():
-            if isinstance(val, graphql_field):
+            if isinstance(val, SchemaField):
                 inner = _unwrap_type_name(val.graphql_type)
                 if type_registry.get(inner) is None:
                     result.append(val.graphql_name)
@@ -233,7 +204,7 @@ def _resolve_subfields_for(
 
 def _lazy_load_response_field(
     obj: GraphQLResponse,
-    desc: graphql_field,
+    desc: SchemaField,
 ) -> Any:
     """Lazy-load a field on a ``GraphQLResponse`` using descriptor metadata."""
     from .query import add_field_to_query

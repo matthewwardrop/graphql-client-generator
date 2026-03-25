@@ -10,6 +10,7 @@ try:
 except ImportError:
     requests = None  # type: ignore[assignment]
 
+from .builder import BuiltQuery
 from .model import (
     GraphQLModel,
     GraphQLResponse,
