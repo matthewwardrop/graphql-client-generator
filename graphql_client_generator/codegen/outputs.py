@@ -12,8 +12,8 @@ from ..parser import FieldInfo, SchemaInfo
 _SCALAR_NAMES = {"str", "int", "float", "bool", "Any"}
 
 
-def generate_models(schema: SchemaInfo, schema_class_name: str) -> str:
-    """Return the contents of ``models.py`` for the generated package."""
+def generate_outputs(schema: SchemaInfo) -> str:
+    """Return the contents of ``outputs.py`` for the generated package."""
     # Collect all type/interface names so we know which fields are composite.
     all_composite_names: set[str] = set()
     for t in schema.types:
@@ -22,12 +22,12 @@ def generate_models(schema: SchemaInfo, schema_class_name: str) -> str:
         all_composite_names.add(iface.name)
 
     lines = [
-        '"""GraphQL schema types and query builder."""',
+        '"""GraphQL schema output types."""',
         "",
         "from __future__ import annotations",
         "",
-        "from ._runtime.builder import BuiltQuery, SchemaField",
-        "from ._runtime.client import GraphQLClientBase, _ResultRoot",
+        "from ._runtime.builder import SchemaField",
+        "from ._runtime.client import _ResultRoot",
         "from ._runtime.model import GraphQLModel",
         "",
     ]
@@ -78,12 +78,6 @@ def generate_models(schema: SchemaInfo, schema_class_name: str) -> str:
         lines.extend(_generate_result_class("MutationResult", schema.mutation_type.fields))
         lines.append("")
 
-    # Schema namespace class.
-    lines.extend(_generate_schema_class(
-        schema_class_name, schema, all_composite_names,
-    ))
-    lines.append("")
-
     return "\n".join(lines)
 
 
@@ -118,7 +112,7 @@ def _generate_schema_field(
     composite_names: set[str],
     indent: int,
 ) -> str:
-    """Generate a single SchemaField line."""
+    """Generate a single SchemaField line (using lambda for deferred resolution)."""
     pad = " " * indent
     py_name = to_snake_case(f.name)
     target_type = _unwrap_type_name(f.graphql_type)
@@ -146,62 +140,6 @@ def _generate_schema_field(
     )
 
 
-def _generate_schema_class(
-    schema_class_name: str,
-    schema: SchemaInfo,
-    composite_names: set[str],
-) -> list[str]:
-    """Generate the root schema namespace class."""
-    lines: list[str] = []
-
-    lines.append("")
-    lines.append(f"class _{schema_class_name}:")
-    lines.append('    """Root query fields.  Use ``Schema[...]`` to build a query."""')
-    lines.append("")
-
-    # Query root fields.
-    if schema.query_type:
-        for f in schema.query_type.fields:
-            lines.append(_generate_schema_field(f, composite_names, indent=4))
-        lines.append("")
-
-    # __getitem__ to build a BuiltQuery.
-    lines.append("    def __getitem__(self, selections):")
-    lines.append("        if not isinstance(selections, tuple):")
-    lines.append("            selections = (selections,)")
-    lines.append('        return BuiltQuery(list(selections), {}, "query")')
-    lines.append("")
-
-    # Mutation sub-namespace.
-    if schema.mutation_type and schema.mutation_type.fields:
-        lines.append("    class mutate:")
-        lines.append('        """Mutation root fields.  Use ``Schema.mutate[...]``."""')
-        lines.append("")
-        for f in schema.mutation_type.fields:
-            lines.append(_generate_schema_field(f, composite_names, indent=8))
-        lines.append("")
-        lines.append("        def __getitem__(self, selections):")
-        lines.append("            if not isinstance(selections, tuple):")
-        lines.append("                selections = (selections,)")
-        lines.append('            return BuiltQuery(list(selections), {}, "mutation")')
-        lines.append("")
-
-    # __dir__ for tab completion.
-    lines.append("    def __dir__(self):")
-    lines.append("        return [")
-    if schema.query_type:
-        for f in schema.query_type.fields:
-            py_name = to_snake_case(f.name)
-            lines.append(f'            "{py_name}",')
-    lines.append("        ]")
-    lines.append("")
-
-    # Singleton instance.
-    lines.append(f"{schema_class_name} = _{schema_class_name}()")
-
-    return lines
-
-
 def _generate_result_class(name: str, fields: list[FieldInfo]) -> list[str]:
     """Generate a typed _ResultRoot subclass with annotation-only attributes."""
     lines: list[str] = []
@@ -215,14 +153,9 @@ def _generate_result_class(name: str, fields: list[FieldInfo]) -> list[str]:
         return lines
     for f in fields:
         py_name = to_snake_case(f.name)
-        py_type = _model_python_type(f.python_type)
+        py_type = f.python_type
         lines.append(f"    {py_name}: {py_type}")
     return lines
-
-
-def _model_python_type(python_type: str) -> str:
-    """The Python type annotation for a model field."""
-    return python_type
 
 
 def _format_docstring(description: str, indent: int) -> list[str]:

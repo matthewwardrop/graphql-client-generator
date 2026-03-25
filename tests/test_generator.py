@@ -57,7 +57,7 @@ class TestGenerate:
     ):
         pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path)
         module = pkg / "test_client"
-        for fname in ("__init__.py", "enums.py", "inputs.py", "models.py", "client.py"):
+        for fname in ("__init__.py", "enums.py", "inputs.py", "outputs.py", "schema.py", "client.py"):
             assert (module / fname).exists(), f"Missing file: {fname}"
         assert (pkg / "pyproject.toml").exists()
 
@@ -78,8 +78,8 @@ class TestGenerate:
         client_code = (module / "client.py").read_text()
         assert "class TestClientClient(" in client_code
 
-        models_code = (module / "models.py").read_text()
-        assert "TestClientSchema = _TestClientSchema()" in models_code
+        schema_code = (module / "schema.py").read_text()
+        assert "TestClientSchema = _TestClientSchema()" in schema_code
 
     def test_enums_file_content(
         self, tmp_path: Path, minimal_schema_path: Path
@@ -171,7 +171,7 @@ class TestModuleMode:
         # module mode: files go directly in the project dir (no nesting)
         pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path, as_package=False)
         assert pkg == tmp_path / "test_client"
-        for fname in ("__init__.py", "enums.py", "inputs.py", "models.py", "client.py"):
+        for fname in ("__init__.py", "enums.py", "inputs.py", "outputs.py", "schema.py", "client.py"):
             assert (pkg / fname).exists(), f"Missing file: {fname}"
         assert (pkg / "_runtime").is_dir()
 

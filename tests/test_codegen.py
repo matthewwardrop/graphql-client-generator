@@ -7,7 +7,8 @@ import pytest
 from graphql_client_generator.codegen.client import generate_client
 from graphql_client_generator.codegen.enums import generate_enums
 from graphql_client_generator.codegen.inputs import generate_inputs
-from graphql_client_generator.codegen.models import generate_models
+from graphql_client_generator.codegen.outputs import generate_outputs
+from graphql_client_generator.codegen.schema import generate_schema
 from graphql_client_generator.codegen.package import generate_init, generate_pyproject
 from graphql_client_generator.parser import (
     EnumInfo,
@@ -189,65 +190,49 @@ class TestGenerateInputs:
 
 
 # ---------------------------------------------------------------------------
-# generate_models
+# generate_outputs
 # ---------------------------------------------------------------------------
 
 
-class TestGenerateModels:
+class TestGenerateOutputs:
     def test_has_schema_field_import(self, minimal_schema: SchemaInfo):
-        code = generate_models(minimal_schema, "TestSchema")
+        code = generate_outputs(minimal_schema)
         assert "SchemaField" in code
 
     def test_has_type_registry(self, minimal_schema: SchemaInfo):
-        code = generate_models(minimal_schema, "TestSchema")
+        code = generate_outputs(minimal_schema)
         assert "TYPE_REGISTRY" in code
         assert '"User": User' in code
         assert '"Post": Post' in code
 
     def test_has_query_result(self, minimal_schema: SchemaInfo):
-        code = generate_models(minimal_schema, "TestSchema")
+        code = generate_outputs(minimal_schema)
         assert "class QueryResult(_ResultRoot):" in code
 
     def test_has_mutation_result(self, minimal_schema: SchemaInfo):
-        code = generate_models(minimal_schema, "TestSchema")
+        code = generate_outputs(minimal_schema)
         assert "class MutationResult(_ResultRoot):" in code
 
-    def test_has_schema_class(self, minimal_schema: SchemaInfo):
-        code = generate_models(minimal_schema, "TestSchema")
-        assert "class _TestSchema:" in code
-        assert "TestSchema = _TestSchema()" in code
-
     def test_model_classes_generated(self, minimal_schema: SchemaInfo):
-        code = generate_models(minimal_schema, "TestSchema")
+        code = generate_outputs(minimal_schema)
         assert "class User(" in code
         assert "class Post(" in code
 
     def test_interface_class_generated(self, minimal_schema: SchemaInfo):
-        code = generate_models(minimal_schema, "TestSchema")
+        code = generate_outputs(minimal_schema)
         assert "class Node(GraphQLModel):" in code
 
     def test_union_type_alias(self, minimal_schema: SchemaInfo):
-        code = generate_models(minimal_schema, "TestSchema")
+        code = generate_outputs(minimal_schema)
         assert "SearchResult = User | Post" in code
 
-    def test_schema_class_has_query_fields(self, minimal_schema: SchemaInfo):
-        code = generate_models(minimal_schema, "TestSchema")
-        # The schema class should have user and users fields
-        assert '"user"' in code
-        assert '"users"' in code
-
-    def test_schema_class_has_mutate(self, minimal_schema: SchemaInfo):
-        code = generate_models(minimal_schema, "TestSchema")
-        assert "class mutate:" in code
-
     def test_empty_schema(self, empty_schema: SchemaInfo):
-        code = generate_models(empty_schema, "TestSchema")
+        code = generate_outputs(empty_schema)
         assert "TYPE_REGISTRY" in code
-        # no mutation result for empty schema
         assert "MutationResult" not in code
 
     def test_typename_set_on_model(self, minimal_schema: SchemaInfo):
-        code = generate_models(minimal_schema, "TestSchema")
+        code = generate_outputs(minimal_schema)
         assert '__typename__ = "User"' in code
         assert '__typename__ = "Post"' in code
 
@@ -260,7 +245,7 @@ class TestGenerateModels:
             ],
             query_type=TypeInfo(name="Query", fields=[]),
         )
-        code = generate_models(schema, "TestSchema")
+        code = generate_outputs(schema)
         assert "# A union" in code
 
     def test_type_with_description(self):
@@ -268,7 +253,7 @@ class TestGenerateModels:
             types=[TypeInfo(name="Foo", fields=[], description="A foo type")],
             query_type=TypeInfo(name="Query", fields=[]),
         )
-        code = generate_models(schema, "TestSchema")
+        code = generate_outputs(schema)
         assert '"""A foo type"""' in code
 
     def test_type_with_no_fields(self):
@@ -276,7 +261,7 @@ class TestGenerateModels:
             types=[TypeInfo(name="Empty", fields=[])],
             query_type=TypeInfo(name="Query", fields=[]),
         )
-        code = generate_models(schema, "TestSchema")
+        code = generate_outputs(schema)
         assert "class Empty(" in code
         assert "    pass" in code
 
@@ -285,15 +270,66 @@ class TestGenerateModels:
             types=[TypeInfo(name="Tricky", fields=[], description='Has """quotes"""')],
             query_type=TypeInfo(name="Query", fields=[]),
         )
-        code = generate_models(schema, "TestSchema")
+        code = generate_outputs(schema)
         assert r'\"\"\"' in code
 
     def test_no_query_no_mutation_no_result_classes(self):
         schema = SchemaInfo(
             types=[TypeInfo(name="Foo", fields=[FieldInfo(name="x", graphql_type="String", python_type="str | None")])],
         )
-        code = generate_models(schema, "TestSchema")
+        code = generate_outputs(schema)
         assert "QueryResult" not in code
+        assert "MutationResult" not in code
+
+    def test_model_field_with_arguments(self):
+        from graphql_client_generator.parser import FieldArgInfo
+        schema = SchemaInfo(
+            types=[TypeInfo(name="Foo", fields=[
+                FieldInfo(
+                    name="items",
+                    graphql_type="[String!]!",
+                    python_type="list[str]",
+                    arguments=[FieldArgInfo(name="limit", graphql_type="Int!", python_type="int")],
+                )
+            ])],
+        )
+        code = generate_outputs(schema)
+        assert 'arg_types={"limit": "Int!"}' in code
+        assert 'doc="items(limit: Int!)"' in code
+
+
+# ---------------------------------------------------------------------------
+# generate_schema
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateSchema:
+    def test_has_schema_class(self, minimal_schema: SchemaInfo):
+        code = generate_schema(minimal_schema, "TestSchema")
+        assert "class _TestSchema:" in code
+        assert "TestSchema = _TestSchema()" in code
+
+    def test_schema_class_has_query_fields(self, minimal_schema: SchemaInfo):
+        code = generate_schema(minimal_schema, "TestSchema")
+        assert '"user"' in code
+        assert '"users"' in code
+
+    def test_schema_class_has_mutate(self, minimal_schema: SchemaInfo):
+        code = generate_schema(minimal_schema, "TestSchema")
+        assert "class mutate:" in code
+
+    def test_imports_outputs(self, minimal_schema: SchemaInfo):
+        code = generate_schema(minimal_schema, "TestSchema")
+        assert "from . import outputs" in code
+
+    def test_uses_direct_type_refs(self, minimal_schema: SchemaInfo):
+        code = generate_schema(minimal_schema, "TestSchema")
+        assert "outputs." in code
+        assert "lambda:" not in code
+
+    def test_empty_schema(self, empty_schema: SchemaInfo):
+        code = generate_schema(empty_schema, "TestSchema")
+        assert "class _TestSchema:" in code
         assert "MutationResult" not in code
 
 
@@ -362,11 +398,12 @@ class TestGenerateInit:
         )
         assert "from .client import MyClient" in code
 
-    def test_imports_models(self, minimal_schema: SchemaInfo):
+    def test_imports_outputs_and_schema(self, minimal_schema: SchemaInfo):
         code = generate_init(
             minimal_schema, "my_package", "MyClient", "MySchema"
         )
-        assert "from .models import *" in code
+        assert "from .outputs import *" in code
+        assert "from .schema import *" in code
 
     def test_imports_enums(self, minimal_schema: SchemaInfo):
         code = generate_init(
@@ -508,7 +545,7 @@ class TestMultilineDescriptions:
             types=[TypeInfo(name="Widget", description=MULTILINE_CLASS_DESC, fields=[])],
             query_type=TypeInfo(name="Query", fields=[]),
         )
-        code = generate_models(schema, "TestSchema")
+        code = generate_outputs(schema)
         assert "    Short summary." in code
         assert "    Longer explanation here." in code
         compile(code, "<generated>", "exec")
@@ -519,7 +556,7 @@ class TestMultilineDescriptions:
             unions=[UnionInfo(name="AB", member_types=["A", "B"], description=MULTILINE_DESC)],
             query_type=TypeInfo(name="Query", fields=[]),
         )
-        code = generate_models(schema, "TestSchema")
+        code = generate_outputs(schema)
         assert "# First line." in code
         assert "# When creating: required." in code
         compile(code, "<generated>", "exec")
