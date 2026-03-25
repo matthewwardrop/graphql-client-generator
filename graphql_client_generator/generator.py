@@ -54,8 +54,8 @@ def generate_from_text(
     """
     output_dir = Path(output_dir)
     # Normalise: distribution name uses hyphens, Python module name uses underscores.
-    dist_name = package_name.replace("_", "-")
-    python_name = package_name.replace("-", "_")
+    dist_name = package_name.replace("_", "-").lower()
+    python_name = package_name.replace("-", "_").lower()
 
     if as_package:
         project_dir = output_dir / dist_name
@@ -169,4 +169,4 @@ def generate_from_endpoint(
 def _to_pascal_case(name: str) -> str:
     """Convert ``snake_case`` or ``kebab-case`` to ``PascalCase``."""
     parts = name.replace("-", "_").split("_")
-    return "".join(p.capitalize() for p in parts)
+    return "".join(p[0].upper() + p[1:] if p else "" for p in parts)
