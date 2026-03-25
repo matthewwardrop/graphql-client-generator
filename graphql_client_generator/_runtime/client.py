@@ -185,6 +185,16 @@ class _ResultRoot(GraphQLModel):
         obj.__type_registry__ = self._type_registry_local
         return obj
 
+    def __repr__(self) -> str:
+        from .model import _format_model
+
+        saved = self.__type_registry__
+        self.__type_registry__ = self._type_registry_local
+        try:
+            return _format_model(self, indent=0)
+        finally:
+            self.__type_registry__ = saved
+
     def to_dict(self) -> dict[str, Any]:
         return {k: _serialize(v) for k, v in self._data.items()}
 
