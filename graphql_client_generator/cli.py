@@ -6,8 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .generator import generate_from_file, generate_from_text
-from .introspection import fetch_schema_sdl
+from .generator import generate_from_endpoint, generate_from_file
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -54,26 +53,25 @@ def main(argv: list[str] | None = None) -> None:
 
     output_dir = Path(args.output)
 
-    if args.schema.startswith(("http://", "https://")):
-        # Remote endpoint - fetch schema via introspection.
-        headers = _parse_headers(args.headers)
-        try:
-            schema_text = fetch_schema_sdl(args.schema, headers=headers or None)
-        except RuntimeError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            sys.exit(1)
-
-        package_name = args.name or "client"
-        result_path = generate_from_text(schema_text, package_name, output_dir, as_package=not args.module)
-    else:
-        # Local file.
-        schema_path = Path(args.schema)
-        if not schema_path.exists():
-            print(f"Error: schema file not found: {schema_path}", file=sys.stderr)
-            sys.exit(1)
-
-        package_name = args.name or schema_path.stem
-        result_path = generate_from_file(schema_path, package_name, output_dir, as_package=not args.module)
+    try:
+        if args.schema.startswith(("http://", "https://")):
+            # Remote endpoint - fetch schema via introspection.
+            headers = _parse_headers(args.headers)
+            package_name = args.name or "client"
+            result_path = generate_from_endpoint(
+                args.schema, package_name, output_dir,
+                headers=headers or None, as_package=not args.module,
+            )
+        else:
+            # Local file.
+            schema_path = Path(args.schema)
+            package_name = args.name or schema_path.stem
+            result_path = generate_from_file(
+                schema_path, package_name, output_dir, as_package=not args.module,
+            )
+    except (RuntimeError, OSError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"Generated: {result_path}")
 
