@@ -194,8 +194,7 @@ class TestGenerateInputs:
             ]
         )
         code = generate_inputs(schema)
-        # post_init with no required fields should have "pass"
-        assert "def __post_init__" in code
+        assert "def __post_init__" not in code
 
     def test_input_escape_docstring(self):
         schema = SchemaInfo(

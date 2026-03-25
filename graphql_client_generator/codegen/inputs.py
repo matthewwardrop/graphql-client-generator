@@ -74,29 +74,26 @@ def _generate_input(inp: InputInfo, enum_names: set[str]) -> list[str]:
     if not required_fields and not optional_fields:
         lines.append("    pass")
 
-    # __post_init__ for validation
-    lines.append("")
-    lines.append("    def __post_init__(self) -> None:")
-
-    if inp.is_one_of:
-        field_names_str = ", ".join(f'"{to_snake_case(f.name)}"' for f in inp.fields)
-        lines.append(f"        _fields = [{field_names_str}]")
-        lines.append("        _set = [f for f in _fields if getattr(self, f) is not None]")
-        lines.append("        if len(_set) != 1:")
-        lines.append("            raise ValueError(")
-        lines.append(
-            f'                f"Exactly one field must be set on @oneOf input '
-            f"{inp.name}, got: {{_set or 'none'}}\""
-        )
-        lines.append("            )")
-    else:
-        # Validate required fields are not None.
-        for f in required_fields:
-            py_name = to_snake_case(f.name)
-            lines.append(f"        if self.{py_name} is None:")
-            lines.append(f'            raise ValueError("{py_name} is required on {inp.name}")')
-        if not required_fields:
-            lines.append("        pass")
+    # __post_init__ for validation (only when there is something to validate)
+    if inp.is_one_of or required_fields:
+        lines.append("")
+        lines.append("    def __post_init__(self) -> None:")
+        if inp.is_one_of:
+            field_names_str = ", ".join(f'"{to_snake_case(f.name)}"' for f in inp.fields)
+            lines.append(f"        _fields = [{field_names_str}]")
+            lines.append("        _set = [f for f in _fields if getattr(self, f) is not None]")
+            lines.append("        if len(_set) != 1:")
+            lines.append("            raise ValueError(")
+            lines.append(
+                f'                f"Exactly one field must be set on @oneOf input '
+                f"{inp.name}, got: {{_set or 'none'}}\""
+            )
+            lines.append("            )")
+        else:
+            for f in required_fields:
+                py_name = to_snake_case(f.name)
+                lines.append(f"        if self.{py_name} is None:")
+                lines.append(f'            raise ValueError("{py_name} is required on {inp.name}")')
 
     # to_dict
     lines.append("")
