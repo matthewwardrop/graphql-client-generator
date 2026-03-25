@@ -79,6 +79,7 @@ class TestGenerate:
 
         schema_code = (module / "schema.py").read_text()
         assert "TestClientSchema = _TestClientSchema()" in schema_code
+        assert "TestClientMutationSchema = _TestClientMutationSchema()" in schema_code
 
     def test_enums_file_content(self, tmp_path: Path, minimal_schema_path: Path):
         pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path)
@@ -106,6 +107,18 @@ class TestGenerate:
         pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path)
         code = (pkg / "test_client" / "__init__.py").read_text()
         assert "TestClientClient" in code
+
+    def test_init_imports_mutation(self, tmp_path: Path, minimal_schema_path: Path):
+        pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path)
+        code = (pkg / "test_client" / "__init__.py").read_text()
+        assert "TestClientMutationSchema" in code
+
+    def test_no_mutation_for_empty_schema(self, tmp_path: Path, empty_schema_path: Path):
+        pkg = generate_from_file(empty_schema_path, "test_client", tmp_path)
+        schema_code = (pkg / "test_client" / "schema.py").read_text()
+        assert "Mutation" not in schema_code
+        init_code = (pkg / "test_client" / "__init__.py").read_text()
+        assert "Mutation" not in init_code
 
     def test_init_has_regen_command(self, tmp_path: Path, minimal_schema_path: Path):
         pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path)

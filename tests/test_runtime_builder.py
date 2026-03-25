@@ -150,9 +150,26 @@ class TestFieldSelectorInit:
         assert sel._target_cls is None
         assert sel._arg_types == {}
         assert sel._arg_doc == ""
+        assert sel._input_arg is None
         assert sel._args == {}
         assert sel._sub_selections == []
         assert sel._alias is None
+
+    def test_input_arg_and_input_cls(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeInput:
+            name: str
+
+        sel = FieldSelector(
+            "createUser",
+            arg_types={"name": "String!"},
+            input_arg="input",
+            input_cls=FakeInput,
+        )
+        assert sel._input_arg == "input"
+        assert sel._input_cls is FakeInput
 
     def test_with_all_args(self):
         def target_fn():
@@ -256,6 +273,83 @@ class TestFieldSelectorCall:
         result = sel(id="123")
         assert result._args == {"id": "123"}
 
+    def test_flattened_input_kwargs(self):
+        """When input_arg and input_cls are set, kwargs are forwarded to input_cls."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeInput:
+            name: str
+            role: str
+
+            def to_dict(self):
+                return {"name": self.name, "role": self.role}
+
+        sel = FieldSelector(
+            "createUser",
+            arg_types={"name": "String!", "role": "Role!"},
+            input_arg="input",
+            input_cls=FakeInput,
+        )
+        result = sel(name="Alice", role="ADMIN")
+        assert "input" in result._args
+        assert isinstance(result._args["input"], FakeInput)
+        assert result._args["input"].name == "Alice"
+        assert result._args["input"].role == "ADMIN"
+
+    def test_flattened_input_validation_propagates(self):
+        """Input constructor errors propagate to the caller."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class StrictInput:
+            name: str
+
+            def __post_init__(self):
+                if not self.name:
+                    raise ValueError("name is required")
+
+        sel = FieldSelector(
+            "createUser",
+            arg_types={"name": "String!"},
+            input_arg="input",
+            input_cls=StrictInput,
+        )
+        with pytest.raises(ValueError, match="name is required"):
+            sel(name="")
+
+    def test_flattened_input_getitem_works(self):
+        """__getitem__ succeeds after calling with flattened kwargs."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeInput:
+            name: str
+
+        sel = FieldSelector(
+            "createUser",
+            arg_types={"name": "String!"},
+            input_arg="input",
+            input_cls=FakeInput,
+            target_cls=lambda: User,
+        )
+        called = sel(name="Alice")
+        child = FieldSelector("id")
+        result = called[child]
+        assert len(result._sub_selections) == 1
+
+    def test_flattened_input_getitem_without_call_raises(self):
+        """__getitem__ raises if flattened input was not provided."""
+        sel = FieldSelector(
+            "createUser",
+            arg_types={"name": "String!"},
+            input_arg="input",
+            input_cls=lambda: None,
+        )
+        child = FieldSelector("id")
+        with pytest.raises(TypeError, match="Missing required"):
+            sel[child]
+
 
 class TestFieldSelectorSignature:
     def test_signature_set_when_arg_types(self):
@@ -284,6 +378,21 @@ class TestFieldSelectorSignature:
         sel = FieldSelector("name")
         # Should have the class-level docstring, not a custom one
         assert "field selection" in sel.__doc__.lower()
+
+    def test_flattened_signature_with_input_arg(self):
+        import inspect
+
+        sel = FieldSelector(
+            "createUser",
+            arg_types={"name": "String!", "role": "Role!"},
+            input_arg="input",
+        )
+        sig = inspect.signature(sel)
+        params = list(sig.parameters.values())
+        assert len(params) == 2
+        assert params[0].name == "name"
+        assert params[0].kind == inspect.Parameter.KEYWORD_ONLY
+        assert params[1].name == "role"
 
 
 class TestFieldSelectorGetitem:
@@ -528,6 +637,23 @@ class TestSchemaField:
         assert sel._target_cls is target_fn
         assert sel._arg_types == {"a": "Int"}
         assert sel._arg_doc == "d"
+
+    def test_input_arg_and_cls_passed_to_selector(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeInput:
+            name: str
+
+        sf = SchemaField(
+            "createUser",
+            arg_types={"name": "String!"},
+            input_arg="input",
+            input_cls=FakeInput,
+        )
+        sel = sf._make_selector()
+        assert sel._input_arg == "input"
+        assert sel._input_cls is FakeInput
 
     def test_repr(self):
         sf = SchemaField("myField")
@@ -867,6 +993,18 @@ class TestToLiteral:
 
     def test_variable_ref(self):
         assert _to_literal(VariableRef("x")) == "$x"
+
+    def test_object_with_to_dict(self):
+        """Objects with to_dict() serialize as GraphQL object literals."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeInput:
+            def to_dict(self):
+                return {"name": "Alice", "age": 30}
+
+        result = _to_literal(FakeInput())
+        assert result == '{name: "Alice", age: 30}'
 
     def test_unknown_type_fallback(self):
         """Unrecognized types fall through to str()."""
