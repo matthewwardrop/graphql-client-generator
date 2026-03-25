@@ -19,6 +19,7 @@ from .model import (
     _serialize_value,
 )
 from .query import ensure_typenames
+from .serialization import to_snake_case
 
 
 class GraphQLError(Exception):
@@ -145,25 +146,24 @@ class _ResultRoot:
         self._context = context
         self._type_registry = type_registry
 
-        # Eagerly coerce all top-level fields.
+        # Eagerly coerce all top-level fields under snake_case keys.
         for key, raw in data.items():
-            self.__dict__[key] = _coerce_response_value(
+            py_key = to_snake_case(key)
+            self.__dict__[py_key] = _coerce_response_value(
                 raw, type_registry, context, key,
             )
 
     def __getattr__(self, name: str) -> Any:
-        # Try camelCase conversion for snake_case attribute access.
-        camel = _to_camel_case(name)
-        if camel in self.__dict__:
-            return self.__dict__[camel]
         raise AttributeError(f"No field '{name}' in query result")
 
     def __repr__(self) -> str:
-        # Use coerced values from __dict__.
-        items = [
-            (k, self.__dict__[k]) for k in self._data
-            if k in self.__dict__ and self.__dict__[k] is not None
-        ]
+        # Use coerced values from __dict__ with snake_case keys.
+        items = []
+        for k in self._data:
+            py_key = to_snake_case(k)
+            val = self.__dict__.get(py_key)
+            if val is not None:
+                items.append((py_key, val))
         if not items:
             return "QueryResult()"
         compact_parts = [f"{k}={_repr_top(v)}" for k, v in items]
@@ -191,7 +191,3 @@ def _repr_top(value: Any) -> str:
     return repr(value)
 
 
-def _to_camel_case(snake: str) -> str:
-    """Convert snake_case to camelCase."""
-    parts = snake.split("_")
-    return parts[0] + "".join(p.capitalize() for p in parts[1:])
