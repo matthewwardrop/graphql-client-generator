@@ -191,7 +191,9 @@ class FieldSelector:
     def _resolve_target(self) -> type | None:
         if self._target_cls is None:
             return None
-        return self._target_cls() if callable(self._target_cls) else self._target_cls
+        if isinstance(self._target_cls, type):
+            return self._target_cls
+        return self._target_cls()
 
     # -- introspection ---------------------------------------------------------
 

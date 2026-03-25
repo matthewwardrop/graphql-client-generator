@@ -384,13 +384,10 @@ class TestFieldSelectorResolveTarget:
         sel = FieldSelector("x", target_cls=lambda: Address)
         assert sel._resolve_target() is Address
 
-    def test_non_callable_target(self):
-        """When target_cls is not callable, it is returned as-is."""
-        # Use a string as a non-callable sentinel (strings aren't callable).
-        sel = FieldSelector("x")
-        sel._target_cls = "not_callable"
-        result = sel._resolve_target()
-        assert result == "not_callable"
+    def test_direct_type_reference(self):
+        """When target_cls is a type, it is returned directly without calling."""
+        sel = FieldSelector("x", target_cls=User)
+        assert sel._resolve_target() is User
 
 
 class TestFieldSelectorDir:

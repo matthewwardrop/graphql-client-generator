@@ -9,7 +9,8 @@ from pathlib import Path
 from .codegen.client import generate_client
 from .codegen.enums import generate_enums
 from .codegen.inputs import generate_inputs
-from .codegen.models import generate_models
+from .codegen.outputs import generate_outputs
+from .codegen.schema import generate_schema
 from .codegen.package import generate_init, generate_pyproject
 from .introspection import fetch_schema_sdl
 from .parser import parse_schema_from_text
@@ -76,7 +77,8 @@ def generate_from_text(
     # Generate Python source files.
     _write(module_dir / "enums.py", generate_enums(schema))
     _write(module_dir / "inputs.py", generate_inputs(schema))
-    _write(module_dir / "models.py", generate_models(schema, schema_class_name))
+    _write(module_dir / "outputs.py", generate_outputs(schema))
+    _write(module_dir / "schema.py", generate_schema(schema, schema_class_name))
     _write(module_dir / "client.py", generate_client(schema, client_class_name))
     _write(
         module_dir / "__init__.py",

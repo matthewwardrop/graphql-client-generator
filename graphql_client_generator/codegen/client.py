@@ -33,7 +33,7 @@ def generate_client(schema: SchemaInfo, client_class_name: str) -> str:
     if has_mutation:
         imports.append("MutationResult")
     imports.append("TYPE_REGISTRY")
-    lines.append(f"from .models import {', '.join(imports)}")
+    lines.append(f"from .outputs import {', '.join(imports)}")
 
     lines.extend([
         "",
