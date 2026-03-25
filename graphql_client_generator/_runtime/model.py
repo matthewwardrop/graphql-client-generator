@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
+from .serialization import to_snake_case
+
 T = TypeVar("T", bound="GraphQLModel")
 
 
@@ -100,9 +102,11 @@ class GraphQLResponse:
         self.__dict__["_type_registry"] = type_registry or {}
 
         # Eagerly coerce all response fields into attributes.
+        # Store under snake_case keys for Pythonic access.
         for key, raw in data.items():
             if key != "__typename":
-                self.__dict__[key] = _coerce_response_value(
+                py_key = to_snake_case(key)
+                self.__dict__[py_key] = _coerce_response_value(
                     raw, self._type_registry, context, key,
                 )
 
@@ -300,11 +304,15 @@ def _serialize_value(value: Any) -> Any:
 def _format_response(obj: GraphQLResponse, indent: int) -> str:
     """Format a GraphQLResponse with its model type name."""
     name = obj._model_cls.__name__ if obj._model_cls else "GraphQLResponse"
-    # Use coerced values from __dict__ (not raw _data).
-    items = [
-        (k, obj.__dict__[k]) for k in obj._data
-        if k != "__typename" and k in obj.__dict__ and obj.__dict__[k] is not None
-    ]
+    # Use coerced values from __dict__ with snake_case keys.
+    items = []
+    for k in obj._data:
+        if k == "__typename":
+            continue
+        py_key = to_snake_case(k)
+        val = obj.__dict__.get(py_key)
+        if val is not None:
+            items.append((py_key, val))
     if not items:
         return f"{name}()"
 
