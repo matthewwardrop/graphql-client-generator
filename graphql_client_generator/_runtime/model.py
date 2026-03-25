@@ -252,12 +252,7 @@ class GraphQLModel:
     # -- dunder ----------------------------------------------------------------
 
     def __repr__(self) -> str:
-        loaded = {k: v for k, v in self._data.items() if v is not None}
-        fields_str = ", ".join(f"{k}={v!r}" for k, v in list(loaded.items())[:5])
-        name = type(self).__name__
-        if len(loaded) > 5:
-            fields_str += ", ..."
-        return f"{name}({fields_str})"
+        return _format_model(self, indent=0)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GraphQLModel):
@@ -282,3 +277,62 @@ def _serialize_value(value: Any) -> Any:
     if isinstance(value, dict):
         return {k: _serialize_value(v) for k, v in value.items()}
     return value
+
+
+# -- repr helpers ----------------------------------------------------------
+
+def _format_model(obj: GraphQLModel, indent: int) -> str:
+    """Format a GraphQLModel, coercing raw dicts to typed models."""
+    name = type(obj).__name__
+    registry = obj.__type_registry__
+    items = [
+        (k, v) for k, v in obj._data.items()
+        if k != "__typename" and v is not None
+    ]
+    if not items:
+        return f"{name}()"
+
+    # Try compact (single-line) first.
+    compact_parts = [
+        f"{k}={_repr_value(v, registry, 0)}" for k, v in items
+    ]
+    compact = f"{name}({', '.join(compact_parts)})"
+    if len(compact) <= 80:
+        return compact
+
+    # Multi-line with indentation.
+    child_indent = indent + 4
+    pad = " " * child_indent
+    lines = [f"{name}("]
+    for k, v in items:
+        val_str = _repr_value(v, registry, child_indent)
+        lines.append(f"{pad}{k}={val_str},")
+    lines.append(" " * indent + ")")
+    return "\n".join(lines)
+
+
+def _repr_value(
+    value: Any,
+    registry: dict[str, type[GraphQLModel]],
+    indent: int,
+) -> str:
+    """Format a single value, coercing dicts to their model types."""
+    if value is None:
+        return "None"
+    if isinstance(value, dict):
+        typename = value.get("__typename")
+        cls = registry.get(typename, GraphQLModel) if typename else GraphQLModel
+        obj = cls(value)
+        obj.__type_registry__ = registry
+        return _format_model(obj, indent)
+    if isinstance(value, list):
+        if not value:
+            return "[]"
+        parts = [_repr_value(item, registry, indent + 4) for item in value]
+        compact = f"[{', '.join(parts)}]"
+        if len(compact) <= 80:
+            return compact
+        pad = " " * (indent + 4)
+        inner = ",\n".join(f"{pad}{p}" for p in parts)
+        return f"[\n{inner},\n{' ' * indent}]"
+    return repr(value)
