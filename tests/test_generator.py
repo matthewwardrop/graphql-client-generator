@@ -34,6 +34,9 @@ class TestToPascalCase:
     def test_mixed_kebab_snake(self):
         assert _to_pascal_case("my-cool_client") == "MyCoolClient"
 
+    def test_preserves_internal_casing(self):
+        assert _to_pascal_case("MyClass-Cool") == "MyClassCool"
+
     def test_empty_string(self):
         assert _to_pascal_case("") == ""
 
@@ -132,6 +135,12 @@ class TestGenerate:
         assert pkg.name == "my-api"
         client_code = (pkg / "my_api" / "client.py").read_text()
         assert "class MyApiClient(" in client_code
+
+    def test_mixed_case_package_name(self, tmp_path: Path, minimal_schema_path: Path):
+        pkg = generate_from_file(minimal_schema_path, "MyClass-Cool", tmp_path)
+        assert pkg.name == "myclass-cool"
+        client_code = (pkg / "myclass_cool" / "client.py").read_text()
+        assert "class MyClassCoolClient(" in client_code
 
 
 class TestGenerateFromEndpoint:
