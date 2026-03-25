@@ -19,14 +19,19 @@ from .parser import parse_schema_from_text
 def generate_from_file(
     schema_path: str | Path,
     package_name: str,
-    output_dir: str | Path,
+    output_dir: str | Path = ".",
     as_package: bool = True,
 ) -> Path:
     """Generate a Python client from a ``.graphqls`` schema file.
 
     Returns the path to the generated directory.
     """
-    return generate_from_text(Path(schema_path).read_text(), package_name, output_dir, as_package)
+    schema_path = Path(schema_path)
+    flags = "" if str(output_dir) == "." else f" -o {output_dir}"
+    if not as_package:
+        flags += " --module"
+    regen_command = f"python -m graphql_client_generator {schema_path} -n {package_name}{flags}"
+    return generate_from_text(schema_path.read_text(), package_name, output_dir, as_package, regen_command=regen_command)
 
 
 def generate_from_text(
@@ -34,6 +39,7 @@ def generate_from_text(
     package_name: str,
     output_dir: str | Path = ".",
     as_package: bool = True,
+    regen_command: str = "",
 ) -> Path:
     """Generate a Python client from SDL text.
 
@@ -82,7 +88,7 @@ def generate_from_text(
     _write(module_dir / "client.py", generate_client(schema, client_class_name))
     _write(
         module_dir / "__init__.py",
-        generate_init(schema, python_name, client_class_name, schema_class_name),
+        generate_init(schema, python_name, client_class_name, schema_class_name, regen_command),
     )
     if as_package:
         _write(project_dir / "pyproject.toml", generate_pyproject(dist_name))
@@ -138,7 +144,11 @@ def generate_from_endpoint(
     PosixPath('my_client')
     """
     schema_text = fetch_schema_sdl(endpoint, session=session, headers=headers)
-    return generate_from_text(schema_text, name, output_dir, as_package)
+    flags = "" if str(output_dir) == "." else f" -o {output_dir}"
+    if not as_package:
+        flags += " --module"
+    regen_command = f"python -m graphql_client_generator {endpoint} -n {name}{flags}"
+    return generate_from_text(schema_text, name, output_dir, as_package, regen_command=regen_command)
 
 
 def _to_pascal_case(name: str) -> str:

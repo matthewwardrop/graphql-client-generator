@@ -118,6 +118,15 @@ class TestGenerate:
         code = (pkg / "test_client" / "__init__.py").read_text()
         assert "TestClientClient" in code
 
+    def test_init_has_regen_command(
+        self, tmp_path: Path, minimal_schema_path: Path
+    ):
+        pkg = generate_from_file(minimal_schema_path, "test_client", tmp_path)
+        code = (pkg / "test_client" / "__init__.py").read_text()
+        assert "To regenerate:" in code
+        assert "graphql_client_generator" in code
+        assert "test_client" in code
+
     def test_kebab_case_package_name(
         self, tmp_path: Path, minimal_schema_path: Path
     ):
@@ -154,8 +163,35 @@ class TestGenerateFromEndpoint:
             session=None,
             headers={"Authorization": "Bearer tok"},
         )
-        mock_gen.assert_called_once_with("type Query { ping: String }", "client", tmp_path, True)
+        mock_gen.assert_called_once_with(
+            "type Query { ping: String }", "client", tmp_path, True,
+            regen_command=f"python -m graphql_client_generator https://api.example.com/graphql -n client -o {tmp_path}",
+        )
         assert result == tmp_path / "client"
+
+    def test_module_flag_in_regen_command(self, tmp_path: Path):
+        from unittest.mock import patch
+        from graphql_client_generator.generator import generate_from_endpoint
+
+        with (
+            patch(
+                "graphql_client_generator.generator.fetch_schema_sdl",
+                return_value="type Query { ping: String }",
+            ),
+            patch(
+                "graphql_client_generator.generator.generate_from_text",
+                return_value=tmp_path / "client",
+            ) as mock_gen,
+        ):
+            generate_from_endpoint(
+                "https://api.example.com/graphql",
+                "client",
+                tmp_path,
+                as_package=False,
+            )
+
+        _, kwargs = mock_gen.call_args
+        assert "--module" in kwargs["regen_command"]
 
 
 class TestModuleMode:

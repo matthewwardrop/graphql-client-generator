@@ -398,24 +398,20 @@ class TestGenerateInit:
         )
         assert "from .client import MyClient" in code
 
-    def test_imports_outputs_and_schema(self, minimal_schema: SchemaInfo):
+    def test_imports_schema_class(self, minimal_schema: SchemaInfo):
         code = generate_init(
             minimal_schema, "my_package", "MyClient", "MySchema"
         )
-        assert "from .outputs import *" in code
-        assert "from .schema import *" in code
+        assert "from .schema import MySchema" in code
 
-    def test_imports_enums(self, minimal_schema: SchemaInfo):
+    def test_imports_modules(self, minimal_schema: SchemaInfo):
         code = generate_init(
             minimal_schema, "my_package", "MyClient", "MySchema"
         )
-        assert "from .enums import *" in code
-
-    def test_imports_inputs(self, minimal_schema: SchemaInfo):
-        code = generate_init(
-            minimal_schema, "my_package", "MyClient", "MySchema"
-        )
-        assert "from .inputs import *" in code
+        assert "from . import outputs" in code
+        assert "from . import schema" in code
+        assert "from . import enums" in code
+        assert "from . import inputs" in code
 
     def test_imports_variable(self, minimal_schema: SchemaInfo):
         code = generate_init(
@@ -430,12 +426,30 @@ class TestGenerateInit:
         assert "__all__" in code
         assert "'MyClient'" in code
         assert "'MySchema'" in code
+        assert "'outputs'" in code
+        assert "'schema'" in code
+        assert "'enums'" in code
+        assert "'inputs'" in code
 
     def test_docstring_includes_package_name(self, minimal_schema: SchemaInfo):
         code = generate_init(
             minimal_schema, "my_package", "MyClient", "MySchema"
         )
         assert "my_package" in code
+
+    def test_regen_command_included(self, minimal_schema: SchemaInfo):
+        code = generate_init(
+            minimal_schema, "my_package", "MyClient", "MySchema",
+            regen_command="python -m graphql_client_generator schema.graphqls -n my_package",
+        )
+        assert "To regenerate:" in code
+        assert "python -m graphql_client_generator schema.graphqls -n my_package" in code
+
+    def test_regen_command_omitted_when_empty(self, minimal_schema: SchemaInfo):
+        code = generate_init(
+            minimal_schema, "my_package", "MyClient", "MySchema"
+        )
+        assert "To regenerate:" not in code
 
 
 # ---------------------------------------------------------------------------
