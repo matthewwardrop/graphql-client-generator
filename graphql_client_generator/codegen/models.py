@@ -58,7 +58,7 @@ def generate_models(schema: SchemaInfo, schema_class_name: str) -> str:
     for union in sorted(schema.unions, key=lambda u: u.name):
         members = " | ".join(union.member_types)
         if union.description:
-            lines.append(f"# {union.description}")
+            lines.extend(_format_comment(union.description, 0))
         lines.append(f"{union.name} = {members}")
         lines.append("")
 
@@ -99,7 +99,7 @@ def _generate_model_class(
     lines.append("")
     lines.append(f"class {name}({base}):")
     if description:
-        lines.append(f'    """{_escape_docstring(description)}"""')
+        lines.extend(_format_docstring(description, 4))
     lines.append(f'    __typename__ = "{name}"')
     lines.append("")
 
@@ -225,8 +225,28 @@ def _model_python_type(python_type: str) -> str:
     return python_type
 
 
-def _escape_docstring(s: str) -> str:
-    return s.replace('"""', r'\"\"\"')
+def _format_docstring(description: str, indent: int) -> list[str]:
+    """Return a properly indented triple-quoted docstring for *description*."""
+    pad = " " * indent
+    escaped = description.replace('"""', r'\"\"\"')
+    raw = escaped.splitlines()
+    if len(raw) == 1:
+        return [f'{pad}"""{escaped}"""']
+    result = [f'{pad}"""']
+    for line in raw:
+        stripped = line.strip()
+        result.append(f"{pad}{stripped}" if stripped else "")
+    result.append(f'{pad}"""')
+    return result
+
+
+def _format_comment(description: str, indent: int) -> list[str]:
+    """Return each line of *description* as a ``# `` comment."""
+    pad = " " * indent
+    return [
+        f"{pad}# {line}" if line.strip() else f"{pad}#"
+        for line in description.splitlines()
+    ]
 
 
 def _unwrap_type_name(graphql_type: str) -> str:
