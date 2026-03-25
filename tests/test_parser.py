@@ -24,6 +24,7 @@ from graphql_client_generator.parser import (
     _is_list_type,
     _type_to_string,
     parse_schema,
+    parse_schema_from_text,
 )
 
 
@@ -434,3 +435,26 @@ class TestDetectOneOfInputs:
         text = "input   Foo   @oneOf { x: String }"
         result = _detect_one_of_inputs(text)
         assert result == {"Foo"}
+
+
+# ---------------------------------------------------------------------------
+# Tests for parse_schema_from_text
+# ---------------------------------------------------------------------------
+
+class TestParseSchemaFromText:
+    def test_same_result_as_parse_schema(self, minimal_schema_path, minimal_schema):
+        """parse_schema_from_text on the same SDL should produce identical output."""
+        text = minimal_schema_path.read_text()
+        result = parse_schema_from_text(text)
+        assert {t.name for t in result.types} == {t.name for t in minimal_schema.types}
+        assert {e.name for e in result.enums} == {e.name for e in minimal_schema.enums}
+        assert {i.name for i in result.inputs} == {i.name for i in minimal_schema.inputs}
+        assert result.query_type is not None
+        assert result.mutation_type is not None
+
+    def test_inline_sdl(self):
+        """Passing inline SDL text should work without any file on disk."""
+        sdl = "type Query { ping: String }"
+        result = parse_schema_from_text(sdl)
+        assert result.query_type is not None
+        assert result.query_type.fields[0].name == "ping"

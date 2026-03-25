@@ -5,10 +5,7 @@ from __future__ import annotations
 
 from typing import Any
 
-try:
-    import requests
-except ImportError:
-    requests = None  # type: ignore[assignment]
+import requests
 
 from .builder import BuiltQuery
 from .model import (

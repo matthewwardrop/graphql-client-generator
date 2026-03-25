@@ -11,24 +11,36 @@ from .codegen.enums import generate_enums
 from .codegen.inputs import generate_inputs
 from .codegen.models import generate_models
 from .codegen.package import generate_init, generate_pyproject
-from .parser import parse_schema
+from .introspection import fetch_schema_sdl
+from .parser import parse_schema_from_text
 
 
-def generate(
+def generate_from_file(
     schema_path: str | Path,
     package_name: str,
     output_dir: str | Path,
 ) -> Path:
-    """Generate a complete Python client package from a ``.graphqls`` schema.
+    """Generate a complete Python client package from a ``.graphqls`` schema file.
 
     Returns the path to the generated package directory.
     """
-    schema_path = Path(schema_path)
+    return generate_from_text(Path(schema_path).read_text(), package_name, output_dir)
+
+
+def generate_from_text(
+    schema_text: str,
+    package_name: str,
+    output_dir: str | Path = ".",
+) -> Path:
+    """Generate a complete Python client package from SDL text.
+
+    Returns the path to the generated package directory.
+    """
     output_dir = Path(output_dir)
     package_dir = output_dir / package_name
 
     # Parse the schema.
-    schema = parse_schema(schema_path)
+    schema = parse_schema_from_text(schema_text)
 
     # Derive class names from the package name.
     pascal = _to_pascal_case(package_name)
@@ -61,6 +73,52 @@ def generate(
 
 def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
+
+
+def generate_from_endpoint(
+    endpoint: str,
+    name: str,
+    output_dir: str | Path = ".",
+    session: object | None = None,
+    headers: dict[str, str] | None = None,
+) -> Path:
+    """Generate a typed Python client package by introspecting a live GraphQL endpoint.
+
+    This is the recommended entry point for notebook-driven workflows where a
+    ``requests.Session`` with auth, cookies, or custom TLS settings is already
+    configured.
+
+    Parameters
+    ----------
+    endpoint:
+        The GraphQL HTTP endpoint URL.
+    name:
+        Package name for the generated client directory.
+    output_dir:
+        Directory in which to create the package (default: current directory).
+    session:
+        An optional ``requests.Session``.  When supplied its auth/headers are
+        used for the introspection request.
+    headers:
+        Extra HTTP headers to add to the introspection request, e.g.
+        ``{"Authorization": "Bearer <token>"}``.
+
+    Returns
+    -------
+    pathlib.Path
+        The path to the generated package directory.
+
+    Examples
+    --------
+    >>> import requests
+    >>> import graphql_client_generator as gcg
+    >>> s = requests.Session()
+    >>> s.headers["Authorization"] = "Bearer <token>"
+    >>> gcg.generate_from_endpoint("https://api.example.com/graphql", "my_client", session=s)
+    PosixPath('my_client')
+    """
+    schema_text = fetch_schema_sdl(endpoint, session=session, headers=headers)
+    return generate_from_text(schema_text, name, output_dir)
 
 
 def _to_pascal_case(name: str) -> str:

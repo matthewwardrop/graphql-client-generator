@@ -59,7 +59,7 @@ input AddBookInput {
 }
 ```
 
-### Generate a client
+### Generate a client from a local schema file
 
 ```bash
 python -m graphql_client_generator bookstore.graphqls
@@ -68,12 +68,49 @@ python -m graphql_client_generator bookstore.graphqls
 This produces a standalone Python package (`bookstore/`) with typed models,
 a client class, and a query builder.
 
-Options:
+### Generate a client from a live endpoint
+
+Pass an `http://` or `https://` URL instead of a file path and the schema is
+fetched automatically via GraphQL introspection:
+
+```bash
+python -m graphql_client_generator https://api.example.com/graphql -n bookstore
+```
+
+Use `-H` (repeatable) to add HTTP headers - useful for authenticated endpoints:
+
+```bash
+python -m graphql_client_generator https://api.example.com/graphql \
+    -H "Authorization: Bearer $TOKEN" \
+    -n bookstore
+```
+
+### Generate from a notebook or script
+
+`generate_from_endpoint` lets you pass a `requests.Session` directly, so any
+auth, cookies, or TLS settings you have already configured are reused:
+
+```python
+import requests
+import graphql_client_generator as gcg
+
+session = requests.Session()
+session.headers["Authorization"] = "Bearer <token>"
+
+gcg.generate_from_endpoint(
+    "https://api.example.com/graphql",
+    name="bookstore",
+    session=session,
+)
+```
+
+### CLI options
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-n`, `--name` | Package name | Schema filename stem |
+| `-n`, `--name` | Package name | Schema filename stem (file) or `client` (URL) |
 | `-o`, `--output` | Output directory | Current directory |
+| `-H`, `--header` | HTTP header for introspection (`Name: Value`), repeatable | |
 
 ### Use the generated client
 
