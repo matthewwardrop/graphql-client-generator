@@ -84,26 +84,30 @@ def generate_client(schema: SchemaInfo, client_class_name: str) -> str:
         ]
     )
 
-    # mutate() method
-    mutate_return = "MutationResult" if has_mutation else "_ResultRoot"
-    mutate_cls_arg = ", result_cls=MutationResult" if has_mutation else ""
+    # mutate() method (only when the schema defines mutations)
+    if has_mutation:
+        lines.extend(
+            [
+                "",
+                "    def mutate(",
+                "        self,",
+                "        *args: str | BuiltQuery | FieldSelector,",
+                "        variables: dict[str, Any] | None = None,",
+                "        operation_name: str | None = None,",
+                "        **aliases: FieldSelector,",
+                "    ) -> MutationResult:",
+                '        """Execute a GraphQL mutation and return typed result objects."""',
+                '        query_str = _resolve_query(args, aliases, "mutation")',
+                (
+                    "        return self._execute("
+                    'query_str, variables, operation_name, operation_type="mutation"'
+                    ", result_cls=MutationResult)"
+                ),
+            ]
+        )
 
     lines.extend(
         [
-            "",
-            "    def mutate(",
-            "        self,",
-            "        *args: str | BuiltQuery | FieldSelector,",
-            "        variables: dict[str, Any] | None = None,",
-            "        operation_name: str | None = None,",
-            "        **aliases: FieldSelector,",
-            f"    ) -> {mutate_return}:",
-            '        """Execute a GraphQL mutation and return typed result objects."""',
-            '        query_str = _resolve_query(args, aliases, "mutation")',
-            (
-                "        return self._execute("
-                f'query_str, variables, operation_name, operation_type="mutation"{mutate_cls_arg})'
-            ),
             "",
             "",
             "def _resolve_query(",

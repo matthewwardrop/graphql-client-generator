@@ -719,10 +719,8 @@ class TestGenerateClient:
 
     def test_without_mutation(self, empty_schema: SchemaInfo):
         code = generate_client(empty_schema, "TestClient")
-        # Should not import MutationResult
         assert "MutationResult" not in code
-        # mutate method should still exist but return _ResultRoot
-        assert "def mutate(" in code
+        assert "def mutate(" not in code
 
     def test_without_query(self):
         # Schema with no query type
