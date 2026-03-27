@@ -273,6 +273,27 @@ class TestFieldSelectorCall:
         result = sel(id="123")
         assert result._args == {"id": "123"}
 
+    def test_non_null_arg_with_default_not_required(self):
+        """An arg whose '!' was stripped (because it has a schema default) is optional."""
+        sel = FieldSelector(
+            "findNodes",
+            arg_types={"active": "Boolean", "name": "String"},
+        )
+        result = sel()  # both optional, should succeed
+        assert result._args == {}
+
+    def test_mix_of_required_and_defaulted_args(self):
+        """Only args still carrying '!' should be required."""
+        sel = FieldSelector(
+            "findNodes",
+            arg_types={"id": "ID!", "limit": "Int", "active": "Boolean"},
+        )
+        with pytest.raises(TypeError, match="Missing required argument.*id"):
+            sel(limit=10)
+        # Providing the required arg should work
+        result = sel(id="abc")
+        assert result._args == {"id": "abc"}
+
     def test_flattened_input_kwargs(self):
         """When input_arg and input_cls are set, kwargs are forwarded to input_cls."""
         from dataclasses import dataclass

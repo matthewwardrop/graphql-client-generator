@@ -49,7 +49,7 @@ def _generate_input(inp: InputInfo, enum_names: set[str]) -> list[str]:
     required_fields: list[FieldInfo] = []
     optional_fields: list[FieldInfo] = []
     for f in inp.fields:
-        if f.is_non_null:
+        if f.is_non_null and not f.has_default:
             required_fields.append(f)
         else:
             optional_fields.append(f)

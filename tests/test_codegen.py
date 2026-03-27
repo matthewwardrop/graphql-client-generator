@@ -213,6 +213,85 @@ class TestGenerateInputs:
         code = generate_inputs(schema)
         assert r"\"\"\"" in code
 
+    def test_non_null_field_with_default_is_optional(self):
+        """A non-null input field with a schema default should be optional."""
+
+        schema = SchemaInfo(
+            inputs=[
+                InputInfo(
+                    name="Filter",
+                    fields=[
+                        FieldInfo(
+                            name="active",
+                            graphql_type="Boolean!",
+                            python_type="bool",
+                            is_non_null=True,
+                            default=True,
+                        ),
+                        FieldInfo(
+                            name="name",
+                            graphql_type="String!",
+                            python_type="str",
+                            is_non_null=True,
+                        ),
+                    ],
+                )
+            ]
+        )
+        code = generate_inputs(schema)
+        # 'name' is required (no default), 'active' has a default so it's optional
+        assert "name: str" in code
+        assert "active: bool = None" in code
+        # required fields come before optional in the dataclass
+        lines = code.splitlines()
+        name_line = next(i for i, line in enumerate(lines) if "name: str" in line)
+        active_line = next(i for i, line in enumerate(lines) if "active: bool" in line)
+        assert name_line < active_line
+
+    def test_non_null_field_with_default_no_post_init_validation(self):
+        """A non-null field with a default should not be validated in __post_init__."""
+        schema = SchemaInfo(
+            inputs=[
+                InputInfo(
+                    name="Settings",
+                    fields=[
+                        FieldInfo(
+                            name="verbose",
+                            graphql_type="Boolean!",
+                            python_type="bool",
+                            is_non_null=True,
+                            default=False,
+                        ),
+                    ],
+                )
+            ]
+        )
+        code = generate_inputs(schema)
+        # No required fields -> no __post_init__
+        assert "__post_init__" not in code
+
+    def test_non_null_field_without_default_still_required(self):
+        """A non-null field without a default is still required."""
+        schema = SchemaInfo(
+            inputs=[
+                InputInfo(
+                    name="Settings",
+                    fields=[
+                        FieldInfo(
+                            name="name",
+                            graphql_type="String!",
+                            python_type="str",
+                            is_non_null=True,
+                        ),
+                    ],
+                )
+            ]
+        )
+        code = generate_inputs(schema)
+        assert "name: str" in code
+        assert "= None" not in code.split("name: str")[1].split("\n")[0]
+        assert "__post_init__" in code
+
 
 # ---------------------------------------------------------------------------
 # generate_outputs
@@ -472,6 +551,142 @@ class TestGenerateSchema:
         )
         code = generate_schema(schema, "TestSchema", "TestMutation")
         assert "input_arg" not in code
+
+    def test_query_field_with_input_arg_gets_flattened(self):
+        """Query fields (not just mutations) with an input arg get input_cls wiring."""
+        schema = SchemaInfo(
+            inputs=[
+                InputInfo(
+                    name="NodeFilter",
+                    fields=[
+                        FieldInfo("name", "String", "str | None", is_non_null=False),
+                        FieldInfo("active", "Boolean!", "bool", is_non_null=True),
+                    ],
+                ),
+            ],
+            types=[
+                TypeInfo(
+                    name="Node",
+                    fields=[
+                        FieldInfo("id", "ID!", "str", is_non_null=True),
+                    ],
+                ),
+            ],
+            query_type=TypeInfo(
+                name="Query",
+                fields=[
+                    FieldInfo(
+                        name="findNodes",
+                        graphql_type="[Node!]!",
+                        python_type="list[Node]",
+                        arguments=[
+                            FieldArgInfo("filter", "NodeFilter!", "NodeFilter"),
+                        ],
+                    ),
+                ],
+            ),
+        )
+        code = generate_schema(schema, "TestSchema")
+        assert 'input_arg="filter"' in code
+        assert "input_cls=inputs.NodeFilter" in code
+
+    def test_arg_with_default_strips_bang_in_schema(self):
+        """Args with defaults should have '!' stripped in arg_types."""
+        schema = SchemaInfo(
+            query_type=TypeInfo(
+                name="Query",
+                fields=[
+                    FieldInfo(
+                        name="items",
+                        graphql_type="[String!]!",
+                        python_type="list[str]",
+                        arguments=[
+                            FieldArgInfo("limit", "Int!", "int", default=10),
+                            FieldArgInfo("id", "ID!", "str"),
+                        ],
+                    ),
+                ],
+            ),
+        )
+        code = generate_schema(schema, "TestSchema")
+        # 'limit' has a default -> no '!' in arg_types
+        assert '"limit": "Int"' in code
+        # 'id' has no default -> '!' preserved
+        assert '"id": "ID!"' in code
+
+    def test_flattened_input_field_with_default_strips_bang_in_schema(self):
+        """Flattened input fields with defaults strip '!' in arg_types."""
+        schema = SchemaInfo(
+            inputs=[
+                InputInfo(
+                    name="Opts",
+                    fields=[
+                        FieldInfo(
+                            "verbose",
+                            "Boolean!",
+                            "bool",
+                            is_non_null=True,
+                            default=False,
+                        ),
+                        FieldInfo(
+                            "name",
+                            "String!",
+                            "str",
+                            is_non_null=True,
+                        ),
+                    ],
+                ),
+            ],
+            mutation_type=TypeInfo(
+                name="Mutation",
+                fields=[
+                    FieldInfo(
+                        name="run",
+                        graphql_type="Boolean!",
+                        python_type="bool",
+                        arguments=[
+                            FieldArgInfo("opts", "Opts!", "Opts"),
+                        ],
+                    ),
+                ],
+            ),
+        )
+        code = generate_schema(schema, "TestSchema", "TestMutation")
+        # verbose has default=False -> no '!'
+        assert '"verbose": "Boolean"' in code
+        # name has no default -> '!' preserved
+        assert '"name": "String!"' in code
+
+
+# ---------------------------------------------------------------------------
+# generate_outputs - arg default handling
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateOutputsArgDefaults:
+    def test_output_field_arg_with_default_strips_bang(self):
+        """Output type field args with defaults strip '!' in arg_types."""
+        schema = SchemaInfo(
+            types=[
+                TypeInfo(
+                    name="Foo",
+                    fields=[
+                        FieldInfo(
+                            name="items",
+                            graphql_type="[String!]!",
+                            python_type="list[str]",
+                            arguments=[
+                                FieldArgInfo("limit", "Int!", "int", default=25),
+                                FieldArgInfo("cursor", "String!", "str"),
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+        code = generate_outputs(schema)
+        assert '"limit": "Int"' in code
+        assert '"cursor": "String!"' in code
 
 
 # ---------------------------------------------------------------------------

@@ -110,6 +110,14 @@ class TestParseSchemaMinimal:
         assert arg.name == "first"
         assert arg.graphql_type == "Int"
         assert arg.default == 10
+        assert arg.has_default is True
+
+    def test_query_user_argument_no_default(self, minimal_schema: SchemaInfo):
+        qt = minimal_schema.query_type
+        user_field = next(f for f in qt.fields if f.name == "user")
+        arg = user_field.arguments[0]
+        assert arg.name == "id"
+        assert arg.has_default is False
 
     def test_user_type_fields(self, minimal_schema: SchemaInfo):
         user_type = next(t for t in minimal_schema.types if t.name == "User")
@@ -425,3 +433,77 @@ class TestParseSchemaFromText:
         result = parse_schema_from_text(sdl)
         assert result.query_type is not None
         assert result.query_type.fields[0].name == "ping"
+
+
+# ---------------------------------------------------------------------------
+# Tests for default values on input fields and field arguments
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultValues:
+    """Test that default values are correctly parsed for input fields and args."""
+
+    def test_input_field_non_null_with_default_has_default(self):
+        sdl = """\
+type Query { q: String }
+input Filter { active: Boolean! = true }
+"""
+        schema = parse_schema_from_text(sdl)
+        inp = next(i for i in schema.inputs if i.name == "Filter")
+        field = next(f for f in inp.fields if f.name == "active")
+        assert field.is_non_null is True
+        assert field.has_default is True
+        assert field.default is True
+
+    def test_input_field_non_null_without_default(self):
+        sdl = """\
+type Query { q: String }
+input Filter { name: String! }
+"""
+        schema = parse_schema_from_text(sdl)
+        inp = next(i for i in schema.inputs if i.name == "Filter")
+        field = next(f for f in inp.fields if f.name == "name")
+        assert field.is_non_null is True
+        assert field.has_default is False
+
+    def test_input_field_nullable_no_default(self):
+        sdl = """\
+type Query { q: String }
+input Filter { tag: String }
+"""
+        schema = parse_schema_from_text(sdl)
+        inp = next(i for i in schema.inputs if i.name == "Filter")
+        field = next(f for f in inp.fields if f.name == "tag")
+        assert field.is_non_null is False
+        assert field.has_default is False
+
+    def test_input_field_default_false_is_not_missing(self):
+        """A default of `false` must not be confused with no default."""
+        sdl = """\
+type Query { q: String }
+input Filter { hidden: Boolean! = false }
+"""
+        schema = parse_schema_from_text(sdl)
+        inp = next(i for i in schema.inputs if i.name == "Filter")
+        field = next(f for f in inp.fields if f.name == "hidden")
+        assert field.has_default is True
+        assert field.default is False
+
+    def test_field_arg_with_default(self):
+        sdl = """\
+type Query { items(limit: Int! = 20): [String!]! }
+"""
+        schema = parse_schema_from_text(sdl)
+        arg = schema.query_type.fields[0].arguments[0]
+        assert arg.name == "limit"
+        assert arg.has_default is True
+        assert arg.default == 20
+
+    def test_field_arg_without_default(self):
+        sdl = """\
+type Query { item(id: ID!): String }
+"""
+        schema = parse_schema_from_text(sdl)
+        arg = schema.query_type.fields[0].arguments[0]
+        assert arg.name == "id"
+        assert arg.has_default is False

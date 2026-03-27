@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from graphql import build_schema
+from graphql.pyutils import Undefined
 from graphql.type import (
     GraphQLEnumType,
     GraphQLField,
@@ -27,6 +28,10 @@ from graphql.type import (
 # ---------------------------------------------------------------------------
 
 
+_NO_DEFAULT = object()
+"""Sentinel indicating a field has no default value."""
+
+
 @dataclass
 class FieldArgInfo:
     """One argument on a field."""
@@ -34,8 +39,13 @@ class FieldArgInfo:
     name: str
     graphql_type: str
     python_type: str
-    default: Any = None
+    default: Any = _NO_DEFAULT
     description: str = ""
+
+    @property
+    def has_default(self) -> bool:
+        """Whether this argument has a schema-defined default value."""
+        return self.default is not _NO_DEFAULT
 
 
 @dataclass
@@ -49,6 +59,12 @@ class FieldInfo:
     is_list: bool = False
     description: str = ""
     arguments: list[FieldArgInfo] = field(default_factory=list)
+    default: Any = _NO_DEFAULT
+
+    @property
+    def has_default(self) -> bool:
+        """Whether this field has a schema-defined default value."""
+        return self.default is not _NO_DEFAULT
 
 
 @dataclass
@@ -212,6 +228,7 @@ def _extract_input(gql_type: GraphQLInputObjectType) -> InputInfo:
         python_type_str = _graphql_type_to_python(f.type)
         is_non_null = isinstance(f.type, GraphQLNonNull)
         is_list = _is_list_type(f.type)
+        default = _NO_DEFAULT if f.default_value is Undefined else f.default_value
         fields.append(
             FieldInfo(
                 name=name,
@@ -220,6 +237,7 @@ def _extract_input(gql_type: GraphQLInputObjectType) -> InputInfo:
                 is_non_null=is_non_null,
                 is_list=is_list,
                 description=f.description or "",
+                default=default,
             )
         )
     return InputInfo(
@@ -261,12 +279,13 @@ def _extract_field(name: str, gql_field: GraphQLField) -> FieldInfo:
 
     args = []
     for arg_name, arg in gql_field.args.items():
+        default = _NO_DEFAULT if arg.default_value is Undefined else arg.default_value
         args.append(
             FieldArgInfo(
                 name=arg_name,
                 graphql_type=_type_to_string(arg.type),
                 python_type=_graphql_type_to_python(arg.type),
-                default=arg.default_value,
+                default=default,
                 description=arg.description or "",
             )
         )

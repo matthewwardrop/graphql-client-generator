@@ -94,10 +94,8 @@ def _generate_root_class(
     )
     lines.append("")
 
-    detect_input = operation_type == "mutation"
-
     for f in fields:
-        detected = _detect_input_arg(f, input_map) if detect_input else None
+        detected = _detect_input_arg(f, input_map)
         lines.append(_generate_schema_field(f, composite_names, indent=4, input_info=detected))
     if fields:
         lines.append("")
@@ -157,12 +155,17 @@ def _generate_schema_field(
         arg_name, inp = input_info
         # Flatten the Input type's fields as arg_types.
         arg_entries = ", ".join(
-            f'"{to_snake_case(field.name)}": "{field.graphql_type}"' for field in inp.fields
+            f'"{to_snake_case(field.name)}": '
+            f'"{_effective_arg_type(field.graphql_type, field.has_default)}"'
+            for field in inp.fields
         )
         arg_types_str = f", arg_types={{{arg_entries}}}"
         input_extra = f', input_arg="{arg_name}", input_cls=inputs.{inp.name}'
     elif f.arguments:
-        arg_entries = ", ".join(f'"{a.name}": "{a.graphql_type}"' for a in f.arguments)
+        arg_entries = ", ".join(
+            f'"{a.name}": "{_effective_arg_type(a.graphql_type, a.has_default)}"'
+            for a in f.arguments
+        )
         arg_types_str = f", arg_types={{{arg_entries}}}"
     else:
         arg_types_str = ""
@@ -179,6 +182,13 @@ def _generate_schema_field(
         f"target_cls={target_cls}"
         f"{arg_types_str}{doc_str}{input_extra})"
     )
+
+
+def _effective_arg_type(graphql_type: str, has_default: bool) -> str:
+    """Strip trailing ``!`` when the arg has a schema default (not required from client)."""
+    if has_default and graphql_type.endswith("!"):
+        return graphql_type[:-1]
+    return graphql_type
 
 
 def _unwrap_type_name(graphql_type: str) -> str:
