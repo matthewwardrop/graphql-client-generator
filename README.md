@@ -184,15 +184,6 @@ result = client.query(
 **Aliases:**
 
 ```python
-# Top-level alias via keyword argument:
-result = client.query(
-    BookstoreQuery(
-        favourite=BookstoreQuery.book(id=42)[Book.title],
-    ),
-)
-print(result.favourite.title)
-
-# Nested alias via .as_():
 result = client.query(
     BookstoreQuery[
         BookstoreQuery.book(id=42)[
@@ -286,20 +277,6 @@ result.book.title        # str
 result.book.page_count   # int
 result.book.author       # GraphQLResponse (typed as Author)
 result.book.author.name  # str
-```
-
-### Aliases in Responses
-
-Query aliases work naturally. The response attribute uses whatever name
-appeared in the query:
-
-```python
-result = client.query(
-    BookstoreQuery(
-        favourite=BookstoreQuery.book(id=42)[Book.title],
-    ),
-)
-result.favourite.title  # works
 ```
 
 ### Repr

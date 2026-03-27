@@ -22,7 +22,7 @@ def generate_client(schema: SchemaInfo, client_class_name: str) -> str:
         "",
         "import requests",
         "",
-        "from ._runtime.builder import BuiltQuery, FieldSelector, build_query_string",
+        "from ._runtime.builder import BuiltQuery, FieldSelector",
         "from ._runtime.client import GraphQLClientBase",
     ]
 
@@ -58,31 +58,23 @@ def generate_client(schema: SchemaInfo, client_class_name: str) -> str:
     )
 
     # query() method
-    query_return = "QueryResult" if has_query else "_ResultRoot"
-    query_cls_arg = ", result_cls=QueryResult" if has_query else ""
-
-    lines.extend(
-        [
-            "",
-            "    def query(",
-            "        self,",
-            "        *args: str | BuiltQuery | FieldSelector,",
-            "        variables: dict[str, Any] | None = None,",
-            "        operation_name: str | None = None,",
-            "        **aliases: FieldSelector,",
-            f"    ) -> {query_return}:",
-            '        """Execute a GraphQL query and return typed result objects.',
-            "",
-            "        Accepts a raw GraphQL string, a ``BuiltQuery``, or one or more",
-            "        ``FieldSelector`` objects (with optional keyword aliases).",
-            '        """',
-            '        query_str = _resolve_query(args, aliases, "query")',
-            (
-                "        return self._execute("
-                f'query_str, variables, operation_name, operation_type="query"{query_cls_arg})'
-            ),
-        ]
-    )
+    if has_query:
+        lines.extend(
+            [
+                "",
+                "    def query(",
+                "        self,",
+                "        *args: str | BuiltQuery | FieldSelector,",
+                "        variables: dict[str, Any] | None = None,",
+                "        operation_name: str | None = None,",
+                "    ) -> QueryResult:",
+                '        """Execute a GraphQL query and return typed result objects."""',
+                "        return self._execute(",
+                "            *args, variables=variables, operation_name=operation_name,",
+                '            operation_type="query", result_cls=QueryResult,',
+                "        )",
+            ]
+        )
 
     # mutate() method (only when the schema defines mutations)
     if has_mutation:
@@ -94,37 +86,15 @@ def generate_client(schema: SchemaInfo, client_class_name: str) -> str:
                 "        *args: str | BuiltQuery | FieldSelector,",
                 "        variables: dict[str, Any] | None = None,",
                 "        operation_name: str | None = None,",
-                "        **aliases: FieldSelector,",
                 "    ) -> MutationResult:",
                 '        """Execute a GraphQL mutation and return typed result objects."""',
-                '        query_str = _resolve_query(args, aliases, "mutation")',
-                (
-                    "        return self._execute("
-                    'query_str, variables, operation_name, operation_type="mutation"'
-                    ", result_cls=MutationResult)"
-                ),
+                "        return self._execute(",
+                "            *args, variables=variables, operation_name=operation_name,",
+                '            operation_type="mutation", result_cls=MutationResult,',
+                "        )",
             ]
         )
 
-    lines.extend(
-        [
-            "",
-            "",
-            "def _resolve_query(",
-            "    args: tuple[str | BuiltQuery | FieldSelector, ...],",
-            "    aliases: dict[str, FieldSelector],",
-            "    operation_type: str,",
-            ") -> str:",
-            '    """Convert flexible query arguments into a GraphQL query string."""',
-            "    if len(args) == 1 and isinstance(args[0], str):",
-            "        return args[0]",
-            "    if len(args) == 1 and isinstance(args[0], BuiltQuery):",
-            "        return args[0].to_graphql()",
-            "    # FieldSelector args (possibly with keyword aliases)",
-            "    selections = [a for a in args if isinstance(a, FieldSelector)]",
-            "    return build_query_string(selections, aliases, operation_type)",
-            "",
-        ]
-    )
+    lines.append("")
 
     return "\n".join(lines)

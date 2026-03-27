@@ -728,10 +728,6 @@ class TestGenerateClient:
         code = generate_client(schema, "TestClient")
         assert "QueryResult" not in code
 
-    def test_has_resolve_query_function(self, minimal_schema: SchemaInfo):
-        code = generate_client(minimal_schema, "TestClient")
-        assert "def _resolve_query(" in code
-
     def test_init_method(self, minimal_schema: SchemaInfo):
         code = generate_client(minimal_schema, "TestClient")
         assert "def __init__(" in code

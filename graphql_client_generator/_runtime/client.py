@@ -7,6 +7,7 @@ from typing import Any
 
 import requests
 
+from .builder import BuiltQuery, FieldSelector, build_query_string
 from .model import (
     GraphQLModel,
     GraphQLResponse,
@@ -49,33 +50,52 @@ class GraphQLClientBase:
 
     def query(
         self,
-        query: str,
+        *args: str | BuiltQuery | FieldSelector,
         variables: dict[str, Any] | None = None,
         operation_name: str | None = None,
     ) -> _ResultRoot:
-        """Execute a GraphQL **query** and return a typed result tree."""
-        return self._execute(query, variables, operation_name, operation_type="query")
+        """Execute a GraphQL **query** and return a typed result tree.
+
+        Accepts a raw GraphQL string, a ``BuiltQuery``, or one or more
+        ``FieldSelector`` objects.
+        """
+        return self._execute(
+            *args,
+            variables=variables,
+            operation_name=operation_name,
+            operation_type="query",
+        )
 
     def mutate(
         self,
-        mutation: str,
+        *args: str | BuiltQuery | FieldSelector,
         variables: dict[str, Any] | None = None,
         operation_name: str | None = None,
     ) -> _ResultRoot:
-        """Execute a GraphQL **mutation** and return a typed result tree."""
-        return self._execute(mutation, variables, operation_name, operation_type="mutation")
+        """Execute a GraphQL **mutation** and return a typed result tree.
+
+        Accepts a raw GraphQL string, a ``BuiltQuery``, or one or more
+        ``FieldSelector`` objects.
+        """
+        return self._execute(
+            *args,
+            variables=variables,
+            operation_name=operation_name,
+            operation_type="mutation",
+        )
 
     # -- internals -------------------------------------------------------------
 
     def _execute(
         self,
-        query: str,
-        variables: dict[str, Any] | None,
-        operation_name: str | None,
+        *args: str | BuiltQuery | FieldSelector,
+        variables: dict[str, Any] | None = None,
+        operation_name: str | None = None,
         operation_type: str,
         result_cls: type[_ResultRoot] | None = None,
     ) -> _ResultRoot:
-        """Parse, enhance, execute, and convert a GraphQL operation."""
+        """Resolve, enhance, execute, and convert a GraphQL operation."""
+        query = _resolve_query(args, operation_type)
         enhanced_query = ensure_typenames(query)
         data = self._execute_raw(enhanced_query, variables, operation_name)
         return self._build_result_tree(
@@ -130,6 +150,19 @@ class GraphQLClientBase:
         )
         cls = result_cls or _ResultRoot
         return cls(data, root_context, self._type_registry)
+
+
+def _resolve_query(
+    args: tuple[str | BuiltQuery | FieldSelector, ...],
+    operation_type: str,
+) -> str:
+    """Convert flexible query arguments into a GraphQL query string."""
+    if len(args) == 1 and isinstance(args[0], str):
+        return args[0]
+    if len(args) == 1 and isinstance(args[0], BuiltQuery):
+        return args[0].to_graphql()
+    selections = [a for a in args if isinstance(a, FieldSelector)]
+    return build_query_string(selections, {}, operation_type)
 
 
 class _ResultRoot:
