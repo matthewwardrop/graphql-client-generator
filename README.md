@@ -146,8 +146,12 @@ available as an attribute with full IDE support.
 |--------|---------|
 | `Query.field` | Select a field |
 | `Query.field(arg=val)` | Pass arguments to a field |
-| `selector[field1, field2]` | Select sub-fields |
+| `selector[field1, field2]` | Select sub-fields (tuple, list, or any iterable) |
+| `selector[lambda s: (s.a, s.b)]` | Lambda shorthand for sub-field selection |
 | `selector.as_("alias")` | Alias a field |
+| `selector.ALL` | Recursively select all fields without required args |
+| `selector.ALL_SCALAR` | Select only scalar fields (default when no sub-fields given) |
+| `selector.ALL_SHALLOW` | Select all fields one level deep (composites get scalar children) |
 | `Variable.name` | Reference a query variable |
 | `Query[...]` | Build a complete query |
 
@@ -246,15 +250,85 @@ Book.title(x=1)
 # TypeError: Field 'title' takes no arguments
 ```
 
-### Auto-expansion of Scalar Fields
+### Flat Path Syntax
 
-When a composite-type field is used without explicit sub-field selections, all
-of its scalar fields are automatically included:
+Deep dotted paths in sub-field selections are automatically nested. Instead of
+manually wrapping each level with `[]`:
+
+```python
+BookstoreQuery[
+    BookstoreQuery.book(id=42)[
+        Book.title,
+        Book.author[Author.name, Author.books[Book.title]],
+    ],
+]
+```
+
+You can write the paths flat:
+
+```python
+Q = BookstoreQuery
+BookstoreQuery[
+    Q.book(id=42)[
+        Q.book.title,
+        Q.book.author.name,
+        Q.book.author.books.title,
+    ],
+]
+```
+
+Paths through the same intermediate field are merged automatically
+(`author.name` and `author.books.title` become `author { name books { title } }`).
+
+Selections are validated: using a path that doesn't match the receiver raises
+`TypeError`.
+
+### Lambda Shorthand
+
+A callable passed to `[]` receives the field selector itself, avoiding the need
+to repeat the prefix:
+
+```python
+BookstoreQuery[
+    BookstoreQuery.book(id=42)[lambda b: (
+        b.title,
+        b.author.name,
+        b.author.books.title,
+    )],
+]
+```
+
+The lambda (or any callable) can return a single selector, a tuple, a list, or
+any iterable.
+
+### Expansion Modes
+
+When a composite-type field is used without explicit sub-field selections, its
+scalar fields are automatically included (`ALL_SCALAR` mode):
 
 ```python
 BookstoreQuery.genres
 # Equivalent to:
 BookstoreQuery.genres[Genre.id, Genre.name, Genre.description]
+```
+
+Three explicit expansion modes are available on any composite field:
+
+| Mode | Behavior |
+|------|----------|
+| `.ALL_SCALAR` | Scalar fields only (default) |
+| `.ALL` | Recursively expand all fields that don't require arguments |
+| `.ALL_SHALLOW` | All fields one level deep; composite children get scalar-only expansion |
+
+```python
+# Fetch everything recursively (skips fields that require arguments)
+BookstoreQuery[BookstoreQuery.book(id=42).ALL]
+
+# Fetch scalars only
+BookstoreQuery[BookstoreQuery.book(id=42).ALL_SCALAR]
+
+# Fetch one level: scalars + immediate composites (with their scalars)
+BookstoreQuery[BookstoreQuery.book(id=42).ALL_SHALLOW]
 ```
 
 ## Response Objects

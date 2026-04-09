@@ -1585,3 +1585,224 @@ class TestAutoExpandFunctions:
         result = _auto_expand_shallow(User)
         assert "address { __typename" in result
         assert "posts { __typename" in result
+
+
+# ---------------------------------------------------------------------------
+# Path flattening
+# ---------------------------------------------------------------------------
+
+
+class TestPathFlattening:
+    def test_flat_path_auto_nests(self):
+        """Deep dotted paths are automatically nested."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(user[user.address.street, user.address.city])
+        assert result == "user { __typename address { __typename street city } }"
+
+    def test_mixed_flat_and_direct(self):
+        """Flat paths and direct children coexist."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(user[user.name, user.address.street])
+        assert "name" in result
+        assert "address { __typename street }" in result
+
+    def test_deep_nesting(self):
+        """Three-level deep path flattens correctly."""
+        user = FieldSelector("user", target_cls=lambda: DeepUser)
+        result = to_graphql(user[user.address.country.name])
+        assert "address { __typename country { __typename name } }" in result
+
+    def test_merge_shared_intermediate(self):
+        """Multiple paths through same intermediate are merged."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(
+            user[user.name, user.address.street, user.address.city, user.address.zip_code]
+        )
+        assert "name" in result
+        assert "address { __typename street city zipCode }" in result
+
+    def test_intermediate_with_args_preserved(self):
+        """Arguments on intermediate selectors are preserved."""
+        org = FieldSelector("org", target_cls=lambda: Organization)
+        result = to_graphql(org[org.members(limit=5).name])
+        assert "members(limit: 5) { __typename name }" in result
+
+    def test_list_selections(self):
+        """List of selections is accepted."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        sels = [user.name, user.email]
+        result = to_graphql(user[sels])
+        assert "name" in result
+        assert "email" in result
+
+    def test_bare_field_ref_still_works(self):
+        """Selections without _parent (descriptor access) still work."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(user[User.name, User.email])
+        assert "name" in result
+        assert "email" in result
+
+    def test_descriptor_rooted_nested_path(self):
+        """Unparented type with dotted path (e.g. User.address.street)."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(user[User.address.street, User.address.city])
+        assert "address { __typename street city }" in result
+
+    def test_descriptor_rooted_mixed_with_scalars(self):
+        """Mix of bare scalars and descriptor-rooted nested paths."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(user[User.name, User.address.street, User.address.city])
+        assert "name" in result
+        assert "address { __typename street city }" in result
+
+    def test_descriptor_rooted_single_deep(self):
+        """Single descriptor-rooted path that is multi-level deep."""
+        user = FieldSelector("user", target_cls=lambda: DeepUser)
+        result = to_graphql(user[DeepUser.address.country.name])
+        assert "address { __typename country { __typename name } }" in result
+
+    def test_descriptor_rooted_wrong_type_raises(self):
+        """Descriptor-rooted path from wrong type raises TypeError."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        with pytest.raises(TypeError, match="belongs to"):
+            user[Post.id]
+
+    def test_descriptor_rooted_nested_wrong_type_raises(self):
+        """Nested descriptor-rooted path from wrong type raises TypeError."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        with pytest.raises(TypeError, match="belongs to"):
+            user[Post.id, Post.title]
+
+    def test_descriptor_rooted_inside_parented_getitem(self):
+        """Descriptor-rooted paths inside an already-parented __getitem__."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(user[user.name, user.posts[Post.id, Post.title]])
+        assert "name" in result
+        assert "posts { __typename id title }" in result
+
+    def test_parented_child_with_descriptor_sub_selections(self):
+        """Q.parent(args)[Q.parent.child[ChildType.field, ChildType.nested.leaf]].
+
+        Reproduces the pattern where a parented child selector has
+        sub-selections built from descriptor-rooted paths.
+        """
+        user = FieldSelector("user", target_cls=lambda: User, arg_types={"id": "ID!"})
+        result = to_graphql(
+            user(id="1")[
+                user.posts[Post.id, Post.title],
+                user.address[Address.street, Address.city],
+            ]
+        )
+        assert 'user(id: "1") { __typename' in result
+        assert "posts { __typename id title }" in result
+        assert "address { __typename street city }" in result
+
+    def test_parented_child_with_nested_descriptor_paths(self):
+        """Q.parent[Q.parent.child[Type.composite.scalar]]."""
+        user = FieldSelector("user", target_cls=lambda: DeepUser)
+        result = to_graphql(
+            user[
+                user.address[
+                    DeepAddress.street,
+                    DeepAddress.country.name,
+                    DeepAddress.country.code,
+                ]
+            ]
+        )
+        assert "address { __typename street country { __typename name code } }" in result
+
+    def test_receiver_rooted_child_with_descriptor_subs(self):
+        """Q.parent(args)[Q.parent.child[ChildType.scalar, ChildType.nested.leaf]].
+
+        The inner child is receiver-rooted (Q.parent.child), and its
+        sub-selections are descriptor-rooted (ChildType.nested.leaf).
+        """
+        q = FieldSelector("user", target_cls=lambda: User, arg_types={"id": "ID!"})
+        result = to_graphql(
+            q(id="1")[
+                q.posts[
+                    Post.id,
+                    Post.title,
+                ],
+            ]
+        )
+        assert result == 'user(id: "1") { __typename posts { __typename id title } }'
+
+
+# ---------------------------------------------------------------------------
+# Path validation
+# ---------------------------------------------------------------------------
+
+
+class TestPathValidation:
+    def test_wrong_root_raises(self):
+        """Selection from a different root field raises TypeError."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        post = FieldSelector("post", target_cls=lambda: Post)
+        with pytest.raises(TypeError, match="does not start with"):
+            user[post.title]
+
+    def test_sibling_field_raises(self):
+        """Selecting a sibling's child raises TypeError."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        addr = user.address
+        with pytest.raises(TypeError, match="not a descendant"):
+            addr[user.name]
+
+    def test_source_type_mismatch_raises(self):
+        """Bare field ref with wrong source_type raises TypeError."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        with pytest.raises(TypeError, match="belongs to"):
+            user[Post.title]
+
+    def test_source_type_compatible_via_inheritance(self):
+        """Bare field ref from subclass is accepted."""
+        user = FieldSelector("user", target_cls=lambda: UserChild)
+        # UserChild inherits from User, so User.name is compatible
+        result = to_graphql(user[User.name])
+        assert "name" in result
+
+    def test_selection_not_descendant_raises(self):
+        """Selection shallower than receiver raises TypeError."""
+        user = FieldSelector("user", target_cls=lambda: User)
+        addr = user.address
+        # addr.street is valid, but trying to use addr itself as a selection
+        # on addr would be shallower
+        with pytest.raises(TypeError, match="not a descendant"):
+            addr[addr]
+
+
+# ---------------------------------------------------------------------------
+# Lambda shorthand
+# ---------------------------------------------------------------------------
+
+
+class TestLambdaShorthand:
+    def test_basic_lambda(self):
+        user = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(user[lambda u: (u.name, u.email)])
+        assert "name" in result
+        assert "email" in result
+
+    def test_lambda_with_deep_path(self):
+        user = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(user[lambda u: (u.name, u.address.street)])
+        assert "name" in result
+        assert "address { __typename street }" in result
+
+    def test_lambda_returns_single_selector(self):
+        user = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(user[lambda u: u.name])
+        assert "name" in result
+
+    def test_lambda_returns_list(self):
+        user = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(user[lambda u: [u.name, u.email]])
+        assert "name" in result
+        assert "email" in result
+
+    def test_lambda_with_args(self):
+        user = FieldSelector("user", target_cls=lambda: User, arg_types={"id": "ID!"})
+        result = to_graphql(user(id="1")[lambda u: (u.name, u.address.street)])
+        assert 'user(id: "1") { __typename' in result
+        assert "address { __typename street }" in result

@@ -6,6 +6,8 @@ import inspect
 from typing import TYPE_CHECKING, Any, TypeGuard
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .model import GraphQLUnion
 
 # ---------------------------------------------------------------------------
@@ -82,6 +84,7 @@ class FieldSelector:
         self._input_arg = input_arg
         self._input_cls = input_cls
         self._source_type = source_type
+        self._parent: FieldSelector | None = None
         self._args: dict[str, Any] = {}
         self._sub_selections: list[FieldSelector] = []
         self._alias: str | None = None
@@ -114,6 +117,7 @@ class FieldSelector:
             self._input_cls,
             source_type=self._source_type,
         )
+        node._parent = self._parent
         node._args = dict(self._args)
         node._sub_selections = list(self._sub_selections)
         node._alias = self._alias
@@ -166,16 +170,29 @@ class FieldSelector:
 
     def __getitem__(
         self,
-        selections: FieldSelector | tuple[FieldSelector, ...],
+        selections: (
+            FieldSelector
+            | tuple[FieldSelector, ...]
+            | list[FieldSelector]
+            | Callable[[FieldSelector], Any]
+        ),
     ) -> FieldSelector:
         """Set sub-field selections.
 
+        Accepts a single ``FieldSelector``, a tuple/list of them, any
+        iterable yielding them, or a **callable** (lambda shorthand)
+        that receives ``self`` and returns selections::
+
+            Query.user[lambda u: (u.name, u.address.street)]
+
+        Deep dotted paths are automatically flattened into nested
+        sub-selections.  Paths are validated against the receiver.
+
         Raises ``TypeError`` if required arguments have not been provided
-        via ``__call__`` first.
+        via ``__call__`` first, or if a selection path does not match.
         """
         # Validate required args before allowing sub-selections.
         if self._input_arg:
-            # Flattened input mode: check the wrapped arg is present.
             if self._input_arg not in self._args:
                 raise TypeError(
                     f"Missing required argument(s) for field "
@@ -194,10 +211,20 @@ class FieldSelector:
                     f"'{self._graphql_name}': {', '.join(missing)}. "
                     f"Call the field with arguments before selecting sub-fields."
                 )
-        if not isinstance(selections, tuple):
-            selections = (selections,)
+
+        # Normalize input to a flat list.
+        raw: list[FieldSelector]
+        if callable(selections) and not isinstance(selections, FieldSelector):
+            result = selections(self)
+            raw = [result] if isinstance(result, FieldSelector) else list(result)
+        elif isinstance(selections, FieldSelector):
+            raw = [selections]
+        else:
+            raw = list(selections)
+
+        normalized = _flatten_selections(self, raw)
         node = self._clone()
-        node._sub_selections = list(selections)
+        node._sub_selections = normalized
         return node
 
     # -- aliasing via .as_() ---------------------------------------------------
@@ -234,7 +261,9 @@ class FieldSelector:
             for klass in target.__mro__:
                 desc = klass.__dict__.get(name)
                 if isinstance(desc, SchemaField):
-                    return desc._make_selector()
+                    child = desc._make_selector()
+                    child._parent = self
+                    return child
         raise AttributeError(f"No field '{name}' on '{self._graphql_name}'")
 
     def _resolve_target(self) -> type | None:
@@ -667,6 +696,158 @@ def _auto_expand_shallow(target_cls: type) -> str:
                 children = " ".join(scalar_names)
                 parts.append(f"{sf.graphql_name} {{ __typename {children} }}")
     return " ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Path flattening helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_ancestor_path(sel: FieldSelector) -> list[FieldSelector]:
+    """Walk ``_parent`` chain and return ``[root, ..., sel]``."""
+    path: list[FieldSelector] = []
+    node: FieldSelector | None = sel
+    while node is not None:
+        path.append(node)
+        node = node._parent
+    path.reverse()
+    return path
+
+
+def _validate_source_type(sel: FieldSelector, receiver: FieldSelector) -> None:
+    """Validate that *sel*'s ``_source_type`` is compatible with *receiver*'s target."""
+    if sel._source_type is None:
+        return
+    target = receiver._resolve_target()
+    if target is None:
+        return
+    if _is_union(target):
+        # For unions, check that source_type is one of the member types.
+        members = target.__member_types__()
+        if sel._source_type not in members:
+            member_names = ", ".join(m.__name__ for m in members)
+            raise TypeError(
+                f"Field '{sel._graphql_name}' belongs to "
+                f"'{sel._source_type.__name__}', which is not a member of "
+                f"union '{target.__name__}' (members: {member_names})"
+            )
+    elif not issubclass(target, sel._source_type) and not issubclass(sel._source_type, target):
+        raise TypeError(
+            f"Field '{sel._graphql_name}' belongs to "
+            f"'{sel._source_type.__name__}', not '{target.__name__}'"
+        )
+
+
+def _resolve_remaining(
+    sel_path: list[FieldSelector],
+    receiver_path: list[FieldSelector],
+    receiver_depth: int,
+    receiver: FieldSelector,
+) -> list[FieldSelector]:
+    """Compute the remaining path of *sel_path* relative to the receiver.
+
+    Tries receiver-path matching first (the path shares a common ancestor
+    chain with the receiver).  Falls back to descriptor-rooted matching
+    (the root came from a class descriptor and has ``_source_type``).
+    """
+    root = sel_path[0]
+
+    # 1) Try receiver-path matching: does the prefix match?
+    if len(sel_path) > receiver_depth:
+        match = all(
+            sel_path[i]._graphql_name == receiver_path[i]._graphql_name
+            for i in range(receiver_depth)
+        )
+        if match:
+            return sel_path[receiver_depth:]
+
+    # 2) Descriptor-rooted: root has _source_type (came from a class descriptor).
+    if root._parent is None and root._source_type is not None:
+        _validate_source_type(root, receiver)
+        return sel_path
+
+    # 3) Nothing matched — build a useful error.
+    if len(sel_path) <= receiver_depth:
+        raise TypeError(
+            f"Selection '{sel_path[-1]._graphql_name}' is not a descendant of "
+            f"'{receiver._graphql_name}'"
+        )
+    sel_path_str = ".".join(s._graphql_name for s in sel_path)
+    recv_path_str = ".".join(s._graphql_name for s in receiver_path)
+    raise TypeError(
+        f"Selection path '{sel_path_str}' does not start with receiver path '{recv_path_str}'"
+    )
+
+
+def _flatten_selections(
+    receiver: FieldSelector,
+    selections: list[FieldSelector],
+) -> list[FieldSelector]:
+    """Normalize flat path-based selections into a nested tree.
+
+    - Selections without ``_parent``: validated via ``_source_type``,
+      then passed through.
+    - Selections with ``_parent``: path validated against *receiver*'s
+      ancestor path, prefix stripped, deep paths grouped by immediate
+      child and recursively nested.
+    """
+    receiver_path = _get_ancestor_path(receiver)
+    receiver_depth = len(receiver_path)
+
+    direct: list[FieldSelector] = []
+    # graphql_name -> (intermediate FieldSelector, list of remaining-path tails)
+    groups: dict[str, tuple[FieldSelector, list[list[FieldSelector]]]] = {}
+
+    for sel in selections:
+        if sel._parent is None:
+            _validate_source_type(sel, receiver)
+            direct.append(sel)
+            continue
+
+        sel_path = _get_ancestor_path(sel)
+        remaining = _resolve_remaining(sel_path, receiver_path, receiver_depth, receiver)
+
+        if len(remaining) == 1:
+            direct.append(remaining[0])
+        else:
+            # Deep path: group by immediate child's graphql_name.
+            child = remaining[0]
+            key = child._graphql_name
+            if key not in groups:
+                groups[key] = (child, [])
+            groups[key][1].append(remaining[1:])
+
+    # Build nested selectors for each group.
+    for _key, (child_sel, tails) in groups.items():
+        node = child_sel._clone()
+        node._parent = None
+        node._sub_selections = _nest_paths(tails)
+        direct.append(node)
+
+    return direct
+
+
+def _nest_paths(paths: list[list[FieldSelector]]) -> list[FieldSelector]:
+    """Recursively group remaining-path tails into nested sub-selections."""
+    direct: list[FieldSelector] = []
+    groups: dict[str, tuple[FieldSelector, list[list[FieldSelector]]]] = {}
+
+    for path in paths:
+        if len(path) == 1:
+            direct.append(path[0])
+        else:
+            key = path[0]._graphql_name
+            if key not in groups:
+                groups[key] = (path[0], [])
+            groups[key][1].append(path[1:])
+
+    for _key, (child_sel, tails) in groups.items():
+        node = child_sel._clone()
+        node._parent = None
+        node._sub_selections = _nest_paths(tails)
+        direct.append(node)
+
+    return direct
 
 
 def _to_literal(value: Any) -> str:
