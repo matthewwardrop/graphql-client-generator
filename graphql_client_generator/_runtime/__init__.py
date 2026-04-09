@@ -15,6 +15,7 @@ from .model import (
     FieldNotLoadedError,
     GraphQLModel,
     GraphQLResponse,
+    GraphQLUnion,
     PathSegment,
     QueryContext,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "GraphQLError",
     "GraphQLModel",
     "GraphQLResponse",
+    "GraphQLUnion",
     "PathSegment",
     "QueryContext",
     "SchemaField",

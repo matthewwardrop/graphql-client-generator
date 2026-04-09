@@ -387,9 +387,12 @@ class TestGenerateOutputs:
         code = generate_outputs(minimal_schema)
         assert "class Node(GraphQLModel):" in code
 
-    def test_union_type_alias(self, minimal_schema: SchemaInfo):
+    def test_union_class_generated(self, minimal_schema: SchemaInfo):
         code = generate_outputs(minimal_schema)
-        assert "SearchResult = User | Post" in code
+        assert "class SearchResult(GraphQLUnion):" in code
+        assert "__member_types__" in code
+        assert "User" in code
+        assert "Post" in code
 
     def test_empty_schema(self, empty_schema: SchemaInfo):
         code = generate_outputs(empty_schema)
@@ -417,7 +420,7 @@ class TestGenerateOutputs:
             query_type=TypeInfo(name="Query", fields=[]),
         )
         code = generate_outputs(schema)
-        assert "# A union" in code
+        assert '"""A union"""' in code
 
     def test_type_with_description(self):
         schema = SchemaInfo(
@@ -456,6 +459,42 @@ class TestGenerateOutputs:
         code = generate_outputs(schema)
         assert "QueryResult" not in code
         assert "MutationResult" not in code
+
+    def test_union_imports_graphql_union(self, minimal_schema: SchemaInfo):
+        code = generate_outputs(minimal_schema)
+        assert "GraphQLUnion" in code
+
+    def test_union_has_member_types(self, minimal_schema: SchemaInfo):
+        code = generate_outputs(minimal_schema)
+        assert "__member_types__" in code
+        assert "lambda: [" in code
+
+    def test_union_exposes_member_types_as_attributes(self, minimal_schema: SchemaInfo):
+        code = generate_outputs(minimal_schema)
+        # Member types are exposed as class attributes for tab completion
+        assert "    User = User" in code
+        assert "    Post = Post" in code
+
+    def test_no_union_no_graphql_union_import(self, empty_schema: SchemaInfo):
+        code = generate_outputs(empty_schema)
+        assert "GraphQLUnion" not in code
+
+    def test_union_field_gets_target_cls(self):
+        """A field on an object type whose type is a union should get a target_cls."""
+        schema = SchemaInfo(
+            types=[
+                TypeInfo(name="A", fields=[FieldInfo("x", "String", "str | None")]),
+                TypeInfo(name="B", fields=[FieldInfo("y", "Int", "int | None")]),
+                TypeInfo(
+                    name="Container",
+                    fields=[FieldInfo("find", "AB", "AB | None")],
+                ),
+            ],
+            unions=[UnionInfo(name="AB", member_types=["A", "B"])],
+            query_type=TypeInfo(name="Query", fields=[]),
+        )
+        code = generate_outputs(schema)
+        assert "target_cls=lambda: AB" in code
 
     def test_model_field_with_arguments(self):
         from graphql_client_generator.parser import FieldArgInfo
@@ -613,6 +652,22 @@ class TestGenerateSchema:
         assert '"limit": "Int"' in code
         # 'id' has no default -> '!' preserved
         assert '"id": "ID!"' in code
+
+    def test_union_field_gets_target_cls_in_schema(self):
+        """Query fields whose type is a union should get target_cls=outputs.UnionName."""
+        schema = SchemaInfo(
+            types=[
+                TypeInfo(name="A", fields=[FieldInfo("x", "String", "str | None")]),
+                TypeInfo(name="B", fields=[FieldInfo("y", "Int", "int | None")]),
+            ],
+            unions=[UnionInfo(name="AB", member_types=["A", "B"])],
+            query_type=TypeInfo(
+                name="Query",
+                fields=[FieldInfo("find", "AB", "AB | None")],
+            ),
+        )
+        code = generate_schema(schema, "TestSchema")
+        assert "target_cls=outputs.AB" in code
 
     def test_flattened_input_field_with_default_strips_bang_in_schema(self):
         """Flattened input fields with defaults strip '!' in arg_types."""
@@ -926,15 +981,15 @@ class TestMultilineDescriptions:
         assert "    Longer explanation here." in code
         compile(code, "<generated>", "exec")
 
-    def test_multiline_union_comment(self):
+    def test_multiline_union_docstring(self):
         schema = SchemaInfo(
             types=[TypeInfo(name="A", fields=[]), TypeInfo(name="B", fields=[])],
             unions=[UnionInfo(name="AB", member_types=["A", "B"], description=MULTILINE_DESC)],
             query_type=TypeInfo(name="Query", fields=[]),
         )
         code = generate_outputs(schema)
-        assert "# First line." in code
-        assert "# When creating: required." in code
+        assert "    First line." in code
+        assert "    When creating: required." in code
         compile(code, "<generated>", "exec")
 
     def test_single_line_description_unchanged(self):

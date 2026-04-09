@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeGuard
+
+if TYPE_CHECKING:
+    from .model import GraphQLUnion
 
 # ---------------------------------------------------------------------------
 # Variable placeholders
@@ -70,6 +73,7 @@ class FieldSelector:
         arg_doc: str = "",
         input_arg: str | None = None,
         input_cls: Any = None,
+        source_type: type | None = None,
     ) -> None:
         self._graphql_name = graphql_name
         self._target_cls = target_cls
@@ -77,6 +81,7 @@ class FieldSelector:
         self._arg_doc = arg_doc
         self._input_arg = input_arg
         self._input_cls = input_cls
+        self._source_type = source_type
         self._args: dict[str, Any] = {}
         self._sub_selections: list[FieldSelector] = []
         self._alias: str | None = None
@@ -106,6 +111,7 @@ class FieldSelector:
             self._arg_doc,
             self._input_arg,
             self._input_cls,
+            source_type=self._source_type,
         )
         node._args = dict(self._args)
         node._sub_selections = list(self._sub_selections)
@@ -202,11 +208,21 @@ class FieldSelector:
 
     # -- child field access (tab completion) -----------------------------------
 
-    def __getattr__(self, name: str) -> FieldSelector:
+    def __getattr__(self, name: str) -> FieldSelector | _InlineFragmentProxy:
         if name.startswith("_"):
             raise AttributeError(name)
         target = self._resolve_target()
         if target is not None:
+            if _is_union(target):
+                for member in target.__member_types__():
+                    if member.__name__ == name:
+                        return _InlineFragmentProxy(member)
+                member_names = ", ".join(m.__name__ for m in target.__member_types__())
+                raise AttributeError(
+                    f"Field '{self._graphql_name}' is a union type "
+                    f"({target.__name__}). "
+                    f"Select a member type first: {member_names}"
+                )
             for klass in target.__mro__:
                 desc = klass.__dict__.get(name)
                 if isinstance(desc, SchemaField):
@@ -228,10 +244,14 @@ class FieldSelector:
             attrs.append("__call__")
         target = self._resolve_target()
         if target is not None:
-            for klass in target.__mro__:
-                for attr_name, val in klass.__dict__.items():
-                    if isinstance(val, SchemaField) and not attr_name.startswith("_"):
-                        attrs.append(attr_name)
+            if _is_union(target):
+                for member in target.__member_types__():
+                    attrs.append(member.__name__)
+            else:
+                for klass in target.__mro__:
+                    for attr_name, val in klass.__dict__.items():
+                        if isinstance(val, SchemaField) and not attr_name.startswith("_"):
+                            attrs.append(attr_name)
         return attrs
 
     def __repr__(self) -> str:
@@ -274,9 +294,9 @@ class SchemaField:
         self.attr_name = name
 
     def __get__(self, obj: Any, objtype: type | None = None) -> FieldSelector:
-        return self._make_selector()
+        return self._make_selector(source_type=objtype)
 
-    def _make_selector(self) -> FieldSelector:
+    def _make_selector(self, source_type: type | None = None) -> FieldSelector:
         return FieldSelector(
             self.graphql_name,
             target_cls=self._target_cls,
@@ -284,10 +304,123 @@ class SchemaField:
             arg_doc=self._doc,
             input_arg=self._input_arg,
             input_cls=self._input_cls,
+            source_type=source_type,
         )
 
     def __repr__(self) -> str:
         return f"SchemaField({self.graphql_name!r})"
+
+
+# ---------------------------------------------------------------------------
+# Union helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_union(target: type | None) -> TypeGuard[type[GraphQLUnion]]:
+    """Return True if *target* is a ``GraphQLUnion`` subclass."""
+    from .model import GraphQLUnion
+
+    return (
+        target is not None
+        and isinstance(target, type)
+        and issubclass(target, GraphQLUnion)
+        and target is not GraphQLUnion
+    )
+
+
+class _InlineFragmentProxy:
+    """Proxy exposing fields of a specific union member type.
+
+    Created when accessing a member type name on a union-typed
+    ``FieldSelector`` (e.g. ``Query.search.User``).  Attribute access
+    on the proxy returns ``FieldSelector`` instances tagged with
+    ``source_type`` so that ``to_graphql()`` can group them into inline
+    fragments.
+    """
+
+    def __init__(self, member_cls: type) -> None:
+        self._member_cls = member_cls
+
+    def __getattr__(self, name: str) -> FieldSelector:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        for klass in self._member_cls.__mro__:
+            desc = klass.__dict__.get(name)
+            if isinstance(desc, SchemaField):
+                return desc._make_selector(source_type=self._member_cls)
+        raise AttributeError(f"No field '{name}' on '{self._member_cls.__name__}'")
+
+    def __dir__(self) -> list[str]:
+        attrs: list[str] = []
+        for klass in self._member_cls.__mro__:
+            for attr_name, val in klass.__dict__.items():
+                if isinstance(val, SchemaField) and not attr_name.startswith("_"):
+                    attrs.append(attr_name)
+        return attrs
+
+    def __repr__(self) -> str:
+        return f"<{self._member_cls.__name__} fragment>"
+
+
+def _all_graphql_field_names(target_cls: type) -> set[str]:
+    """Return the set of all GraphQL field names on *target_cls*."""
+    names: set[str] = set()
+    for klass in target_cls.__mro__:
+        for val in klass.__dict__.values():
+            if isinstance(val, SchemaField):
+                names.add(val.graphql_name)
+    return names
+
+
+def _build_inline_fragments(
+    sub_selections: list[FieldSelector],
+    union_target: type[GraphQLUnion],
+    var_refs: dict[str, str],
+) -> str:
+    """Build ``... on TypeName { ... }`` fragments for union sub-selections.
+
+    Sub-selections are grouped by their ``_source_type``.  If a selector
+    has no source type, it is assigned to every member type that contains
+    a field with the same GraphQL name.
+    """
+    members = union_target.__member_types__()
+
+    # Group selections by typename.
+    groups: dict[str, list[FieldSelector]] = {}
+    for member in members:
+        groups[member.__typename__] = []
+
+    for sub_sel in sub_selections:
+        if sub_sel._source_type is not None:
+            typename = getattr(sub_sel._source_type, "__typename__", sub_sel._source_type.__name__)
+            if typename in groups:
+                groups[typename].append(sub_sel)
+            # If source_type doesn't match any member, skip it.
+        else:
+            # No source type: assign to every member that has this field.
+            for member in members:
+                if sub_sel._graphql_name in _all_graphql_field_names(member):
+                    groups[member.__typename__].append(sub_sel)
+
+    parts: list[str] = []
+    for typename, sels in groups.items():
+        if sels:
+            children = " ".join(to_graphql(s, var_refs) for s in sels)
+            parts.append(f"... on {typename} {{ {children} }}")
+    return " ".join(parts)
+
+
+def _build_auto_expand_fragments(union_target: type[GraphQLUnion]) -> str:
+    """Build inline fragments auto-expanding each member's scalar fields."""
+    members = union_target.__member_types__()
+    parts: list[str] = []
+    for member in members:
+        scalar_names = _scalar_field_names(member)
+        if scalar_names:
+            typename = member.__typename__
+            fields_str = " ".join(scalar_names)
+            parts.append(f"... on {typename} {{ {fields_str} }}")
+    return " ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -372,6 +505,11 @@ def to_graphql(
 
     # Sub-selections
     if sel._sub_selections:
+        target = sel._resolve_target()
+        if _is_union(target):
+            assert target is not None
+            fragments = _build_inline_fragments(sel._sub_selections, target, var_refs)
+            return f"{prefix}{name}{args_str} {{ __typename {fragments} }}"
         children_strs = [to_graphql(s, var_refs) for s in sel._sub_selections]
         children = " ".join(children_strs)
         return f"{prefix}{name}{args_str} {{ __typename {children} }}"
@@ -380,10 +518,15 @@ def to_graphql(
     # auto-expand with all scalar sub-fields.
     target = sel._resolve_target()
     if target is not None:
-        scalar_names = _scalar_field_names(target)
-        if scalar_names:
-            children = " ".join(scalar_names)
-            return f"{prefix}{name}{args_str} {{ __typename {children} }}"
+        if _is_union(target):
+            fragments = _build_auto_expand_fragments(target)
+            if fragments:
+                return f"{prefix}{name}{args_str} {{ __typename {fragments} }}"
+        else:
+            scalar_names = _scalar_field_names(target)
+            if scalar_names:
+                children = " ".join(scalar_names)
+                return f"{prefix}{name}{args_str} {{ __typename {children} }}"
 
     return f"{prefix}{name}{args_str}"
 

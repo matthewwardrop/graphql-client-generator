@@ -16,12 +16,14 @@ _SCALAR_NAMES = {"str", "int", "float", "bool", "Any"}
 
 def generate_outputs(schema: SchemaInfo) -> str:
     """Return the contents of ``outputs.py`` for the generated package."""
-    # Collect all type/interface names so we know which fields are composite.
+    # Collect all type/interface/union names so we know which fields are composite.
     all_composite_names: set[str] = set()
     for t in schema.types:
         all_composite_names.add(t.name)
     for iface in schema.interfaces:
         all_composite_names.add(iface.name)
+    for union in schema.unions:
+        all_composite_names.add(union.name)
 
     # Build input map for detecting and flattening input args.
     input_map: dict[str, InputInfo] = {inp.name: inp for inp in schema.inputs}
@@ -37,14 +39,13 @@ def generate_outputs(schema: SchemaInfo) -> str:
     ]
     if needs_inputs_import:
         lines.append("from . import inputs")
-    lines.extend(
-        [
-            "from ._runtime.builder import SchemaField",
-            "from ._runtime.client import _ResultRoot",
-            "from ._runtime.model import GraphQLModel",
-            "",
-        ]
-    )
+    lines.append("from ._runtime.builder import SchemaField")
+    lines.append("from ._runtime.client import _ResultRoot")
+    if schema.unions:
+        lines.append("from ._runtime.model import GraphQLModel, GraphQLUnion")
+    else:
+        lines.append("from ._runtime.model import GraphQLModel")
+    lines.append("")
 
     # Collect all type names for the registry.
     all_type_names: list[str] = []
@@ -80,12 +81,17 @@ def generate_outputs(schema: SchemaInfo) -> str:
         lines.append("")
         all_type_names.append(t.name)
 
-    # Union type aliases.
+    # Union types.
     for union in sorted(schema.unions, key=lambda u: u.name):
-        members = " | ".join(union.member_types)
+        lines.append("")
+        lines.append(f"class {union.name}(GraphQLUnion):")
         if union.description:
-            lines.extend(_format_comment(union.description, 0))
-        lines.append(f"{union.name} = {members}")
+            lines.extend(_format_docstring(union.description, 4))
+        members_str = ", ".join(union.member_types)
+        lines.append(f"    __member_types__ = lambda: [{members_str}]")
+        # Expose member types as class attributes for tab completion.
+        for member_name in union.member_types:
+            lines.append(f"    {member_name} = {member_name}")
         lines.append("")
 
     # Type registry: maps __typename -> class.

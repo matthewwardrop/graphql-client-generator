@@ -23,6 +23,8 @@ def generate_schema(
         all_composite_names.add(t.name)
     for iface in schema.interfaces:
         all_composite_names.add(iface.name)
+    for union in schema.unions:
+        all_composite_names.add(union.name)
 
     # Build input map for detecting and flattening input args.
     input_map: dict[str, InputInfo] = {inp.name: inp for inp in schema.inputs}

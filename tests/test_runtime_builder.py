@@ -10,12 +10,15 @@ from graphql_client_generator._runtime.builder import (
     SchemaField,
     Variable,
     VariableRef,
+    _InlineFragmentProxy,
+    _is_union,
     _scalar_field_names,
     _to_literal,
     _VariableNamespace,
     build_query_string,
     to_graphql,
 )
+from graphql_client_generator._runtime.model import GraphQLUnion
 
 # ---------------------------------------------------------------------------
 # Test model classes with SchemaField descriptors
@@ -33,6 +36,7 @@ class Address:
 class Post:
     """Composite type with scalar and composite fields."""
 
+    __typename__ = "Post"
     id = SchemaField("id", "ID!")
     title = SchemaField("title", "String!")
     body = SchemaField("body", "String")
@@ -41,6 +45,7 @@ class Post:
 class User:
     """Composite type referencing other composites."""
 
+    __typename__ = "User"
     id = SchemaField("id", "ID!")
     name = SchemaField("name", "String!")
     email = SchemaField("email", "String")
@@ -64,6 +69,12 @@ class CompositeOnly:
     """A model with only composite (non-scalar) fields."""
 
     user = SchemaField("user", "User", target_cls=lambda: User)
+
+
+class SearchResult(GraphQLUnion):
+    """Test union type."""
+
+    __member_types__ = lambda: [User, Post]  # noqa: E731
 
 
 # A non-callable sentinel to test the non-callable branch of _resolve_target.
@@ -1143,3 +1154,156 @@ class TestIntegration:
         sel = FieldSelector("user", arg_types={"id": "ID!"})
         sel_with_args = sel(id="abc")
         assert repr(sel_with_args) == 'user(id: "abc")'
+
+
+# ---------------------------------------------------------------------------
+# Union type support
+# ---------------------------------------------------------------------------
+
+
+class TestIsUnion:
+    def test_union_subclass_detected(self):
+        assert _is_union(SearchResult) is True
+
+    def test_base_class_not_detected(self):
+        assert _is_union(GraphQLUnion) is False
+
+    def test_regular_class_not_detected(self):
+        assert _is_union(User) is False
+
+    def test_none_not_detected(self):
+        assert _is_union(None) is False
+
+
+class TestInlineFragmentProxy:
+    def test_access_member_field(self):
+        proxy = _InlineFragmentProxy(User)
+        sel = proxy.name
+        assert isinstance(sel, FieldSelector)
+        assert sel._graphql_name == "name"
+        assert sel._source_type is User
+
+    def test_access_nonexistent_field_raises(self):
+        proxy = _InlineFragmentProxy(User)
+        with pytest.raises(AttributeError, match="No field 'missing'"):
+            proxy.missing
+
+    def test_dir_lists_fields(self):
+        proxy = _InlineFragmentProxy(User)
+        attrs = dir(proxy)
+        assert "id" in attrs
+        assert "name" in attrs
+        assert "email" in attrs
+
+    def test_repr(self):
+        proxy = _InlineFragmentProxy(User)
+        assert repr(proxy) == "<User fragment>"
+
+
+class TestUnionFieldSelector:
+    def test_getattr_returns_proxy_for_member_type(self):
+        sel = FieldSelector("search", target_cls=SearchResult)
+        proxy = sel.User
+        assert isinstance(proxy, _InlineFragmentProxy)
+
+    def test_getattr_returns_proxy_for_other_member(self):
+        sel = FieldSelector("search", target_cls=SearchResult)
+        proxy = sel.Post
+        assert isinstance(proxy, _InlineFragmentProxy)
+
+    def test_getattr_unknown_name_raises_with_union_info(self):
+        sel = FieldSelector("search", target_cls=SearchResult)
+        with pytest.raises(AttributeError, match="union type"):
+            sel.unknown_field
+        with pytest.raises(AttributeError, match="User, Post"):
+            sel.unknown_field
+
+    def test_dir_lists_member_type_names(self):
+        sel = FieldSelector("search", target_cls=SearchResult)
+        attrs = dir(sel)
+        assert "User" in attrs
+        assert "Post" in attrs
+
+    def test_chained_field_access(self):
+        """Query.search.User.name produces a tagged FieldSelector."""
+        sel = FieldSelector("search", target_cls=SearchResult)
+        name_sel = sel.User.name
+        assert isinstance(name_sel, FieldSelector)
+        assert name_sel._graphql_name == "name"
+        assert name_sel._source_type is User
+
+
+class TestSourceTypeTracking:
+    def test_descriptor_get_sets_source_type(self):
+        """Accessing User.name via descriptor tags with User."""
+        sel = User.name
+        assert sel._source_type is User
+
+    def test_descriptor_get_on_different_type(self):
+        sel = Post.title
+        assert sel._source_type is Post
+
+    def test_clone_preserves_source_type(self):
+        sel = User.name
+        cloned = sel._clone()
+        assert cloned._source_type is User
+
+    def test_call_preserves_source_type(self):
+        sel = FieldSelector("items", arg_types={"limit": "Int"}, source_type=User)
+        called = sel(limit=10)
+        assert called._source_type is User
+
+
+class TestUnionToGraphql:
+    def test_auto_expand_generates_inline_fragments(self):
+        sel = FieldSelector("search", target_cls=SearchResult)
+        result = to_graphql(sel)
+        assert "__typename" in result
+        assert "... on User {" in result
+        assert "... on Post {" in result
+        # Check scalar fields are included in fragments
+        assert "name" in result
+        assert "title" in result
+
+    def test_explicit_selections_grouped_by_source_type(self):
+        sel = FieldSelector("search", target_cls=SearchResult)
+        name_sel = FieldSelector("name", source_type=User)
+        title_sel = FieldSelector("title", source_type=Post)
+        result = to_graphql(sel[name_sel, title_sel])
+        assert "... on User { name }" in result
+        assert "... on Post { title }" in result
+
+    def test_selections_via_proxy_chain(self):
+        """Using Query.search.User.name and Query.search.Post.title."""
+        search = FieldSelector("search", target_cls=SearchResult)
+        name_sel = search.User.name
+        title_sel = search.Post.title
+        result = to_graphql(search[name_sel, title_sel])
+        assert "... on User { name }" in result
+        assert "... on Post { title }" in result
+
+    def test_selections_via_type_descriptor(self):
+        """Using User.name and Post.title directly (source_type from descriptor)."""
+        search = FieldSelector("search", target_cls=SearchResult)
+        result = to_graphql(search[User.name, Post.title])
+        assert "... on User { name }" in result
+        assert "... on Post { title }" in result
+
+    def test_auto_expand_includes_all_scalar_fields(self):
+        sel = FieldSelector("search", target_cls=SearchResult)
+        result = to_graphql(sel)
+        # User scalars: id, name, email
+        assert "... on User { id name email }" in result
+        # Post scalars: id, title, body
+        assert "... on Post { id title body }" in result
+
+    def test_union_with_arguments(self):
+        sel = FieldSelector(
+            "search",
+            target_cls=SearchResult,
+            arg_types={"query": "String!"},
+        )
+        result = to_graphql(sel(query="test"))
+        assert 'search(query: "test")' in result
+        assert "... on User {" in result
+        assert "... on Post {" in result

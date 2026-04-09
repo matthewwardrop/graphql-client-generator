@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from .builder import SchemaField
 from .serialization import to_snake_case
@@ -46,6 +49,18 @@ class GraphQLModel:
 
     __typename__: str = ""
     __type_registry__: dict[str, type[GraphQLModel]] = {}
+
+
+class GraphQLUnion:
+    """Marker base class for generated GraphQL union types.
+
+    Generated union classes subclass this and declare ``__member_types__``
+    as a lambda returning the list of concrete member model classes.
+    The lambda avoids forward-reference issues since member classes may
+    be defined after the union class in the generated file.
+    """
+
+    __member_types__: ClassVar[Callable[[], list[type[GraphQLModel]]]]
 
 
 # ---------------------------------------------------------------------------
