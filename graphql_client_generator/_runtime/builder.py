@@ -305,7 +305,7 @@ class FieldSelector:
         return attrs
 
     def __repr__(self) -> str:
-        return to_graphql(self)
+        return to_graphql(self, pretty=True)
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +426,8 @@ def _build_inline_fragments(
     sub_selections: list[FieldSelector],
     union_target: type[GraphQLUnion],
     var_refs: dict[str, str],
+    *,
+    pretty: bool = False,
 ) -> str:
     """Build ``... on TypeName { ... }`` fragments for union sub-selections.
 
@@ -455,12 +457,19 @@ def _build_inline_fragments(
     parts: list[str] = []
     for typename, sels in groups.items():
         if sels:
-            children = " ".join(to_graphql(s, var_refs, _auto_nest=False) for s in sels)
-            parts.append(f"... on {typename} {{ {children} }}")
+            child_strs = [to_graphql(s, var_refs, _auto_nest=False, pretty=pretty) for s in sels]
+            if pretty:
+                children = "\n".join(child_strs)
+                parts.append(_format_block("... on ", typename, "", children, pretty))
+            else:
+                children = " ".join(child_strs)
+                parts.append(f"... on {typename} {{ {children} }}")
+    if pretty:
+        return "\n".join(parts)
     return " ".join(parts)
 
 
-def _build_auto_expand_fragments(union_target: type[GraphQLUnion]) -> str:
+def _build_auto_expand_fragments(union_target: type[GraphQLUnion], *, pretty: bool = False) -> str:
     """Build inline fragments auto-expanding each member's scalar fields."""
     members = union_target.__member_types__()
     parts: list[str] = []
@@ -468,8 +477,14 @@ def _build_auto_expand_fragments(union_target: type[GraphQLUnion]) -> str:
         scalar_names = _scalar_field_names(member)
         if scalar_names:
             typename = member.__typename__
-            fields_str = " ".join(scalar_names)
-            parts.append(f"... on {typename} {{ {fields_str} }}")
+            if pretty:
+                fields = "\n".join(scalar_names)
+                parts.append(_format_block("... on ", typename, "", fields, pretty))
+            else:
+                fields_str = " ".join(scalar_names)
+                parts.append(f"... on {typename} {{ {fields_str} }}")
+    if pretty:
+        return "\n".join(parts)
     return " ".join(parts)
 
 
@@ -500,7 +515,7 @@ class BuiltQuery:
         )
 
     def __repr__(self) -> str:
-        return self.to_graphql()
+        return build_query_string(self.selections, self.aliases, self.operation_type, pretty=True)
 
 
 # ---------------------------------------------------------------------------
@@ -512,18 +527,27 @@ def build_query_string(
     selections: list[FieldSelector],
     aliases: dict[str, FieldSelector],
     operation_type: str = "query",
+    *,
+    pretty: bool = False,
 ) -> str:
     """Convert field selectors into a GraphQL query string."""
     var_refs: dict[str, str] = {}
 
     parts: list[str] = []
     for sel in selections:
-        parts.append(to_graphql(sel, var_refs))
+        parts.append(to_graphql(sel, var_refs, pretty=pretty))
     for alias_name, sel in aliases.items():
-        parts.append(f"{alias_name}: {to_graphql(sel, var_refs)}")
+        parts.append(f"{alias_name}: {to_graphql(sel, var_refs, pretty=pretty)}")
+
+    if pretty:
+        fields_str = "\n".join(parts)
+        inner = _indent_block(fields_str, 1)
+        if var_refs:
+            decls = ", ".join(f"${n}: {t}" for n, t in var_refs.items())
+            return f"{operation_type}({decls}) {{\n{inner}\n}}"
+        return f"{operation_type} {{\n{inner}\n}}"
 
     fields_str = " ".join(parts)
-
     if var_refs:
         decls = ", ".join(f"${n}: {t}" for n, t in var_refs.items())
         return f"{operation_type}({decls}) {{ {fields_str} }}"
@@ -535,6 +559,7 @@ def to_graphql(
     var_refs: dict[str, str] | None = None,
     *,
     _auto_nest: bool = True,
+    pretty: bool = False,
 ) -> str:
     """Convert a single ``FieldSelector`` to a GraphQL fragment."""
     if var_refs is None:
@@ -554,7 +579,7 @@ def to_graphql(
             wrapper._parent = None
             wrapper._sub_selections = [inner]
             inner = wrapper
-        return to_graphql(inner, var_refs, _auto_nest=False)
+        return to_graphql(inner, var_refs, _auto_nest=False, pretty=pretty)
 
     name = sel._graphql_name
     prefix = f"{sel._alias}: " if sel._alias else ""
@@ -576,11 +601,15 @@ def to_graphql(
         target = sel._resolve_target()
         if _is_union(target):
             assert target is not None
-            fragments = _build_inline_fragments(sel._sub_selections, target, var_refs)
-            return f"{prefix}{name}{args_str} {{ __typename {fragments} }}"
-        children_strs = [to_graphql(s, var_refs, _auto_nest=False) for s in sel._sub_selections]
-        children = " ".join(children_strs)
-        return f"{prefix}{name}{args_str} {{ __typename {children} }}"
+            fragments = _build_inline_fragments(
+                sel._sub_selections, target, var_refs, pretty=pretty
+            )
+            return _format_block(prefix, name, args_str, fragments, pretty)
+        children_strs = [
+            to_graphql(s, var_refs, _auto_nest=False, pretty=pretty) for s in sel._sub_selections
+        ]
+        children = _join_children(children_strs, pretty)
+        return _format_block(prefix, name, args_str, children, pretty)
 
     # Expansion mode (explicit .ALL / .ALL_SCALAR / .ALL_SHALLOW) or
     # implicit default (ALL) for composite types without sub-selections.
@@ -589,25 +618,54 @@ def to_graphql(
     if target is not None and not mode:
         mode = "ALL_SCALAR"  # default expansion
     if mode and target is not None:
-        expanded = _expand_by_mode(target, mode)
+        expanded = _expand_by_mode(target, mode, pretty=pretty)
         if expanded:
-            return f"{prefix}{name}{args_str} {{ __typename {expanded} }}"
+            body = _prepend_typename(expanded, pretty)
+            return _format_block(prefix, name, args_str, body, pretty)
 
     return f"{prefix}{name}{args_str}"
 
 
-def _expand_by_mode(target: type, mode: str) -> str:
+def _join_children(parts: list[str], pretty: bool) -> str:
+    """Join child fragments, adding __typename, with optional indentation."""
+    if pretty:
+        return "__typename\n" + "\n".join(parts)
+    return "__typename " + " ".join(parts)
+
+
+def _prepend_typename(content: str, pretty: bool) -> str:
+    """Prepend ``__typename`` to expansion content."""
+    if pretty:
+        return "__typename\n" + content
+    return "__typename " + content
+
+
+def _format_block(prefix: str, name: str, args_str: str, inner: str, pretty: bool) -> str:
+    """Wrap *inner* in ``{ ... }`` with optional indentation."""
+    if pretty:
+        return f"{prefix}{name}{args_str} {{\n{_indent_block(inner, 1)}\n}}"
+    return f"{prefix}{name}{args_str} {{ {inner} }}"
+
+
+def _indent_block(text: str, depth: int) -> str:
+    """Indent each line of *text* to *depth* levels."""
+    pad = "  " * depth
+    lines = text.split("\n")
+    return "\n".join(f"{pad}{line}" if line.strip() else line for line in lines)
+
+
+def _expand_by_mode(target: type, mode: str, *, pretty: bool = False) -> str:
     """Dispatch to the appropriate expansion function for *mode*."""
     if _is_union(target):
         if mode == "ALL":
-            return _auto_expand_all_union(target, set())
+            return _auto_expand_all_union(target, set(), pretty=pretty)
         # ALL_SCALAR and ALL_SHALLOW both use scalar-only fragments for unions
-        return _build_auto_expand_fragments(target)
+        return _build_auto_expand_fragments(target, pretty=pretty)
     if mode == "ALL":
-        return _auto_expand_all(target)
+        return _auto_expand_all(target, pretty=pretty)
     if mode == "ALL_SCALAR":
-        return _auto_expand_all_scalar(target)
-    return _auto_expand_shallow(target)
+        return _auto_expand_all_scalar(target, pretty=pretty)
+    return _auto_expand_shallow(target, pretty=pretty)
 
 
 def _scalar_field_names(target_cls: type) -> list[str]:
@@ -663,7 +721,12 @@ def _iter_eligible_fields(target_cls: type) -> list[tuple[SchemaField, type | No
 # -- ALL (recursive) --------------------------------------------------------
 
 
-def _auto_expand_all(target_cls: type, seen: set[type] | None = None) -> str:
+def _auto_expand_all(
+    target_cls: type,
+    seen: set[type] | None = None,
+    *,
+    pretty: bool = False,
+) -> str:
     """Recursively expand all fields without required args."""
     if seen is None:
         seen = set()
@@ -676,55 +739,74 @@ def _auto_expand_all(target_cls: type, seen: set[type] | None = None) -> str:
         if field_target is None:
             parts.append(sf.graphql_name)
         elif _is_union(field_target):
-            frag = _auto_expand_all_union(field_target, seen)
+            frag = _auto_expand_all_union(field_target, seen, pretty=pretty)
             if frag:
-                parts.append(f"{sf.graphql_name} {{ __typename {frag} }}")
+                inner = _prepend_typename(frag, pretty)
+                parts.append(_format_block("", sf.graphql_name, "", inner, pretty))
         else:
-            child = _auto_expand_all(field_target, seen)
+            child = _auto_expand_all(field_target, seen, pretty=pretty)
             if child:
-                parts.append(f"{sf.graphql_name} {{ __typename {child} }}")
+                inner = _prepend_typename(child, pretty)
+                parts.append(_format_block("", sf.graphql_name, "", inner, pretty))
+    if pretty:
+        return "\n".join(parts)
     return " ".join(parts)
 
 
 def _auto_expand_all_union(
     union_target: type[GraphQLUnion],
     seen: set[type],
+    *,
+    pretty: bool = False,
 ) -> str:
     """Build inline fragments recursively expanding each member's fields."""
     parts: list[str] = []
     for member in union_target.__member_types__():
-        fields_str = _auto_expand_all(member, seen)
+        fields_str = _auto_expand_all(member, seen, pretty=pretty)
         if fields_str:
-            parts.append(f"... on {member.__typename__} {{ {fields_str} }}")
+            if pretty:
+                parts.append(_format_block("... on ", member.__typename__, "", fields_str, pretty))
+            else:
+                parts.append(f"... on {member.__typename__} {{ {fields_str} }}")
+    if pretty:
+        return "\n".join(parts)
     return " ".join(parts)
 
 
 # -- ALL_SCALAR (flat scalar fields only) -----------------------------------
 
 
-def _auto_expand_all_scalar(target_cls: type) -> str:
-    """Return a space-separated list of scalar field names on *target_cls*."""
-    return " ".join(_scalar_field_names(target_cls))
+def _auto_expand_all_scalar(target_cls: type, *, pretty: bool = False) -> str:
+    """Return scalar field names on *target_cls*, joined by space or newline."""
+    names = _scalar_field_names(target_cls)
+    if pretty:
+        return "\n".join(names)
+    return " ".join(names)
 
 
 # -- ALL_SHALLOW (one level, no recursion into composites) ------------------
 
 
-def _auto_expand_shallow(target_cls: type) -> str:
+def _auto_expand_shallow(target_cls: type, *, pretty: bool = False) -> str:
     """Expand all fields without required args; composites get scalar-only children."""
     parts: list[str] = []
     for sf, field_target in _iter_eligible_fields(target_cls):
         if field_target is None:
             parts.append(sf.graphql_name)
         elif _is_union(field_target):
-            frag = _build_auto_expand_fragments(field_target)
+            frag = _build_auto_expand_fragments(field_target, pretty=pretty)
             if frag:
-                parts.append(f"{sf.graphql_name} {{ __typename {frag} }}")
+                inner = _prepend_typename(frag, pretty)
+                parts.append(_format_block("", sf.graphql_name, "", inner, pretty))
         else:
             scalar_names = _scalar_field_names(field_target)
             if scalar_names:
-                children = " ".join(scalar_names)
-                parts.append(f"{sf.graphql_name} {{ __typename {children} }}")
+                inner = _prepend_typename(
+                    "\n".join(scalar_names) if pretty else " ".join(scalar_names), pretty
+                )
+                parts.append(_format_block("", sf.graphql_name, "", inner, pretty))
+    if pretty:
+        return "\n".join(parts)
     return " ".join(parts)
 
 

@@ -750,10 +750,10 @@ class TestBuiltQuery:
         result = bq.to_graphql()
         assert "myUser: user" in result
 
-    def test_repr_equals_to_graphql(self):
+    def test_repr_is_pretty(self):
         sel = FieldSelector("name")
         bq = BuiltQuery([sel], {})
-        assert repr(bq) == bq.to_graphql()
+        assert repr(bq) == "query {\n  name\n}"
 
     def test_operation_type_mutation(self):
         sel = FieldSelector("createUser")
@@ -1633,6 +1633,170 @@ class TestAutoExpandFunctions:
         result = _auto_expand_shallow(User)
         assert "address { __typename" in result
         assert "posts { __typename" in result
+
+
+# ---------------------------------------------------------------------------
+# Pretty-printing
+# ---------------------------------------------------------------------------
+
+
+class TestPrettyPrint:
+    def test_simple_field(self):
+        sel = FieldSelector("name")
+        result = to_graphql(sel, pretty=True)
+        assert result == "name"
+
+    def test_field_with_args(self):
+        sel = FieldSelector("user", arg_types={"id": "ID!"})(id="1")
+        result = to_graphql(sel, pretty=True)
+        assert result == 'user(id: "1")'
+
+    def test_composite_auto_expand(self):
+        sel = FieldSelector("address", target_cls=lambda: Address)
+        result = to_graphql(sel, pretty=True)
+        expected = "address {\n  __typename\n  street\n  city\n  zipCode\n}"
+        assert result == expected
+
+    def test_nested_composite(self):
+        sel = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(sel.ALL, pretty=True)
+        assert "user {\n" in result
+        assert "  __typename\n" in result
+        assert "  address {\n" in result
+        assert "    __typename\n" in result
+        assert "    street\n" in result
+
+    def test_build_query_string_pretty(self):
+        sel = FieldSelector("user", target_cls=lambda: User, arg_types={"id": "ID!"})
+        result = build_query_string([sel(id="1")], {}, pretty=True)
+        assert result.startswith("query {\n")
+        assert '  user(id: "1") {\n' in result
+        assert result.endswith("\n}")
+
+    def test_build_query_string_compact(self):
+        sel = FieldSelector("user", target_cls=lambda: User, arg_types={"id": "ID!"})
+        result = build_query_string([sel(id="1")], {})
+        assert "\n" not in result
+
+    def test_repr_is_pretty(self):
+        sel = FieldSelector("user", target_cls=lambda: User, arg_types={"id": "ID!"})
+        r = repr(sel(id="1"))
+        assert "\n" in r
+        assert "  __typename" in r
+
+    def test_to_graphql_compact_by_default(self):
+        sel = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(sel)
+        assert "\n" not in result
+
+    def test_pretty_with_variables(self):
+        sel = FieldSelector("user", arg_types={"id": "ID!"})(id=Variable.uid)
+        result = build_query_string([sel], {}, pretty=True)
+        assert result.startswith("query($uid: ID!) {\n")
+
+    def test_pretty_multiple_root_fields(self):
+        a = FieldSelector("name")
+        b = FieldSelector("email")
+        result = build_query_string([a, b], {}, pretty=True)
+        assert result == "query {\n  name\n  email\n}"
+
+    def test_pretty_nested_indentation_exact(self):
+        """Nested composites use exactly 2 spaces per level, not exponential."""
+        sel = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(sel.ALL, pretty=True)
+        expected = (
+            "user {\n"
+            "  __typename\n"
+            "  id\n"
+            "  name\n"
+            "  email\n"
+            "  address {\n"
+            "    __typename\n"
+            "    street\n"
+            "    city\n"
+            "    zipCode\n"
+            "  }\n"
+            "  posts {\n"
+            "    __typename\n"
+            "    id\n"
+            "    title\n"
+            "    body\n"
+            "  }\n"
+            "}"
+        )
+        assert result == expected
+
+    def test_pretty_deep_nesting_exact(self):
+        """Three-level nesting: user > address > country."""
+        sel = FieldSelector("user", target_cls=lambda: DeepUser)
+        result = to_graphql(sel.ALL, pretty=True)
+        expected = (
+            "user {\n"
+            "  __typename\n"
+            "  id\n"
+            "  name\n"
+            "  address {\n"
+            "    __typename\n"
+            "    country {\n"
+            "      __typename\n"
+            "      name\n"
+            "      code\n"
+            "    }\n"
+            "    street\n"
+            "    city\n"
+            "    zipCode\n"
+            "  }\n"
+            "}"
+        )
+        assert result == expected
+
+    def test_pretty_full_query_nested(self):
+        """Full query with nested indentation."""
+        sel = FieldSelector("user", target_cls=lambda: User, arg_types={"id": "ID!"})
+        result = build_query_string([sel(id="1").ALL], {}, pretty=True)
+        expected = (
+            "query {\n"
+            '  user(id: "1") {\n'
+            "    __typename\n"
+            "    id\n"
+            "    name\n"
+            "    email\n"
+            "    address {\n"
+            "      __typename\n"
+            "      street\n"
+            "      city\n"
+            "      zipCode\n"
+            "    }\n"
+            "    posts {\n"
+            "      __typename\n"
+            "      id\n"
+            "      title\n"
+            "      body\n"
+            "    }\n"
+            "  }\n"
+            "}"
+        )
+        assert result == expected
+
+    def test_pretty_explicit_sub_selections(self):
+        """Explicit sub-selections with correct indentation."""
+        sel = FieldSelector("user", target_cls=lambda: User, arg_types={"id": "ID!"})
+        child = FieldSelector("name")
+        addr = FieldSelector("address", target_cls=lambda: Address)
+        result = to_graphql(sel(id="1")[child, addr], pretty=True)
+        expected = (
+            'user(id: "1") {\n'
+            "  __typename\n"
+            "  name\n"
+            "  address {\n"
+            "    __typename\n"
+            "    street\n"
+            "    city\n"
+            "    zipCode\n"
+            "  }\n"
+            "}"
+        )
+        assert result == expected
 
 
 # ---------------------------------------------------------------------------
