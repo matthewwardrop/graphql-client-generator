@@ -1177,7 +1177,7 @@ class TestIntegration:
         user_sel = FieldSelector("user", target_cls=lambda: User)
         posts_sel = user_sel.posts[FieldSelector("title")]
         result = to_graphql(posts_sel)
-        assert result == "posts { __typename title }"
+        assert result == "user { __typename posts { __typename title } }"
 
     def test_repr_round_trip(self):
         """repr of FieldSelector should produce valid-looking GraphQL."""
@@ -1517,6 +1517,26 @@ class TestExpansionModes:
         sel = FieldSelector("name")
         attrs = dir(sel)
         assert "ALL" not in attrs
+
+    def test_chained_child_expansion_auto_nests(self):
+        """Q.parent(args).child.ALL auto-reconstructs full nesting."""
+        parent = FieldSelector("user", target_cls=lambda: User, arg_types={"id": "ID!"})
+        result = to_graphql(parent(id="1").posts.ALL)
+        assert result == 'user(id: "1") { __typename posts { __typename id title body } }'
+
+    def test_chained_child_expansion_scalar(self):
+        """Q.parent.child.ALL_SCALAR auto-reconstructs full nesting."""
+        parent = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(parent.posts.ALL_SCALAR)
+        assert result == "user { __typename posts { __typename id title body } }"
+
+    def test_chained_grandchild_expansion(self):
+        """Q.parent.child.grandchild.ALL auto-reconstructs full nesting."""
+        parent = FieldSelector("user", target_cls=lambda: DeepUser)
+        result = to_graphql(parent.address.country.ALL)
+        assert result == (
+            "user { __typename address { __typename country { __typename name code } } }"
+        )
 
 
 # ---------------------------------------------------------------------------

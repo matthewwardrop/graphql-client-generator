@@ -443,7 +443,7 @@ def _build_inline_fragments(
     parts: list[str] = []
     for typename, sels in groups.items():
         if sels:
-            children = " ".join(to_graphql(s, var_refs) for s in sels)
+            children = " ".join(to_graphql(s, var_refs, _auto_nest=False) for s in sels)
             parts.append(f"... on {typename} {{ {children} }}")
     return " ".join(parts)
 
@@ -521,10 +521,28 @@ def build_query_string(
 def to_graphql(
     sel: FieldSelector,
     var_refs: dict[str, str] | None = None,
+    *,
+    _auto_nest: bool = True,
 ) -> str:
     """Convert a single ``FieldSelector`` to a GraphQL fragment."""
     if var_refs is None:
         var_refs = {}
+
+    # If this selector has a _parent chain and we're at a top-level call,
+    # reconstruct the nesting from root to leaf so that
+    # `Q.field(args).child.ALL` renders as
+    # `field(args) { __typename child { ... } }`.
+    if _auto_nest and sel._parent is not None:
+        path = _get_ancestor_path(sel)
+        # Build cloned tree from inside out (does not mutate originals).
+        inner = path[-1]._clone()
+        inner._parent = None
+        for ancestor in reversed(path[:-1]):
+            wrapper = ancestor._clone()
+            wrapper._parent = None
+            wrapper._sub_selections = [inner]
+            inner = wrapper
+        return to_graphql(inner, var_refs, _auto_nest=False)
 
     name = sel._graphql_name
     prefix = f"{sel._alias}: " if sel._alias else ""
@@ -548,7 +566,7 @@ def to_graphql(
             assert target is not None
             fragments = _build_inline_fragments(sel._sub_selections, target, var_refs)
             return f"{prefix}{name}{args_str} {{ __typename {fragments} }}"
-        children_strs = [to_graphql(s, var_refs) for s in sel._sub_selections]
+        children_strs = [to_graphql(s, var_refs, _auto_nest=False) for s in sel._sub_selections]
         children = " ".join(children_strs)
         return f"{prefix}{name}{args_str} {{ __typename {children} }}"
 
@@ -820,7 +838,6 @@ def _flatten_selections(
     # Build nested selectors for each group.
     for _key, (child_sel, tails) in groups.items():
         node = child_sel._clone()
-        node._parent = None
         node._sub_selections = _nest_paths(tails)
         direct.append(node)
 
@@ -843,7 +860,6 @@ def _nest_paths(paths: list[list[FieldSelector]]) -> list[FieldSelector]:
 
     for _key, (child_sel, tails) in groups.items():
         node = child_sel._clone()
-        node._parent = None
         node._sub_selections = _nest_paths(tails)
         direct.append(node)
 
