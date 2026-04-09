@@ -10,6 +10,10 @@ from graphql_client_generator._runtime.builder import (
     SchemaField,
     Variable,
     VariableRef,
+    _auto_expand_all,
+    _auto_expand_all_scalar,
+    _auto_expand_shallow,
+    _has_required_args,
     _InlineFragmentProxy,
     _is_union,
     _scalar_field_names,
@@ -853,13 +857,39 @@ class TestToGraphql:
         assert result == "user { __typename name }"
 
     def test_auto_expand_scalar_fields(self):
-        """Composite field without explicit sub-selections auto-expands."""
+        """Composite field without explicit sub-selections auto-expands scalars."""
         sel = FieldSelector("address", target_cls=lambda: Address)
         result = to_graphql(sel)
         assert "__typename" in result
         assert "street" in result
         assert "city" in result
         assert "zipCode" in result
+
+    def test_default_expands_only_scalars(self):
+        """Default expansion includes only scalar fields, not composites."""
+        sel = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(sel)
+        assert result == "user { __typename id name email }"
+
+    def test_all_expands_scalars_and_composites(self):
+        """ALL recursively expands all fields including composites."""
+        sel = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(sel.ALL)
+        assert result == (
+            "user { __typename id name email"
+            " address { __typename street city zipCode }"
+            " posts { __typename id title body } }"
+        )
+
+    def test_all_shallow_expands_one_level(self):
+        """ALL_SHALLOW includes composites but only expands their scalars."""
+        sel = FieldSelector("user", target_cls=lambda: User)
+        result = to_graphql(sel.ALL_SHALLOW)
+        assert result == (
+            "user { __typename id name email"
+            " address { __typename street city zipCode }"
+            " posts { __typename id title body } }"
+        )
 
     def test_no_auto_expand_for_scalar(self):
         """Scalar field (no target_cls) should not auto-expand."""
@@ -887,11 +917,11 @@ class TestToGraphql:
         assert result == "user { __typename address { __typename street } }"
 
     def test_auto_expand_no_scalars(self):
-        """Composite with only composite children should not auto-expand."""
+        """Composite with only composite children has no scalar expansion."""
         sel = FieldSelector("comp", target_cls=lambda: CompositeOnly)
         result = to_graphql(sel)
-        # CompositeOnly has only 'user' which has target_cls (non-scalar)
-        # So _scalar_field_names returns [] -> no auto-expand
+        # Default is ALL_SCALAR: CompositeOnly has only 'user' (composite),
+        # so no scalar fields to expand.
         assert result == "comp"
 
     def test_auto_expand_with_args(self):
@@ -1289,12 +1319,11 @@ class TestUnionToGraphql:
         assert "... on User { name }" in result
         assert "... on Post { title }" in result
 
-    def test_auto_expand_includes_all_scalar_fields(self):
+    def test_auto_expand_includes_scalar_fields(self):
         sel = FieldSelector("search", target_cls=SearchResult)
         result = to_graphql(sel)
-        # User scalars: id, name, email
+        # Default is ALL_SCALAR: only scalar fields per member
         assert "... on User { id name email }" in result
-        # Post scalars: id, title, body
         assert "... on Post { id title body }" in result
 
     def test_union_with_arguments(self):
@@ -1307,3 +1336,252 @@ class TestUnionToGraphql:
         assert 'search(query: "test")' in result
         assert "... on User {" in result
         assert "... on Post {" in result
+
+
+# ---------------------------------------------------------------------------
+# Additional test models for expansion mode tests
+# ---------------------------------------------------------------------------
+
+
+class Country:
+    """Leaf type nested inside Address for deep recursion tests."""
+
+    __typename__ = "Country"
+    name = SchemaField("name", "String!")
+    code = SchemaField("code", "String!")
+
+
+class DeepAddress(Address):
+    """Address with a composite child for testing recursion depth."""
+
+    country = SchemaField("country", "Country", target_cls=lambda: Country)
+
+
+class DeepUser:
+    """User variant pointing to DeepAddress for multi-level expansion."""
+
+    __typename__ = "DeepUser"
+    id = SchemaField("id", "ID!")
+    name = SchemaField("name", "String!")
+    address = SchemaField("address", "DeepAddress", target_cls=lambda: DeepAddress)
+
+
+class Organization:
+    """Type with a mix of required-arg and optional-arg composite fields."""
+
+    __typename__ = "Organization"
+    id = SchemaField("id", "ID!")
+    name = SchemaField("name", "String!")
+    member = SchemaField("member", "User", target_cls=lambda: User, arg_types={"id": "ID!"})
+    members = SchemaField(
+        "members", "[User!]!", target_cls=lambda: User, arg_types={"limit": "Int"}
+    )
+
+
+class TypeA:
+    """Cyclic type A -> B -> A."""
+
+    __typename__ = "TypeA"
+    id = SchemaField("id", "ID!")
+    b = SchemaField("b", "TypeB", target_cls=lambda: TypeB)
+
+
+class TypeB:
+    """Cyclic type B -> A -> B."""
+
+    __typename__ = "TypeB"
+    id = SchemaField("id", "ID!")
+    a = SchemaField("a", "TypeA", target_cls=lambda: TypeA)
+
+
+# ---------------------------------------------------------------------------
+# _has_required_args
+# ---------------------------------------------------------------------------
+
+
+class TestHasRequiredArgs:
+    def test_no_args(self):
+        sf = SchemaField("name", "String!")
+        assert not _has_required_args(sf)
+
+    def test_optional_arg(self):
+        sf = SchemaField("users", "[User!]!", arg_types={"limit": "Int"})
+        assert not _has_required_args(sf)
+
+    def test_required_arg(self):
+        sf = SchemaField("user", "User!", arg_types={"id": "ID!"})
+        assert _has_required_args(sf)
+
+    def test_mixed_args(self):
+        sf = SchemaField("users", "[User!]!", arg_types={"id": "ID!", "limit": "Int"})
+        assert _has_required_args(sf)
+
+
+# ---------------------------------------------------------------------------
+# Required-arg filtering in expansion
+# ---------------------------------------------------------------------------
+
+
+class TestRequiredArgFiltering:
+    def test_default_is_scalar_only(self):
+        sel = FieldSelector("org", target_cls=lambda: Organization)
+        result = to_graphql(sel)
+        # Default ALL_SCALAR: only scalar fields
+        assert "id" in result
+        assert "name" in result
+        # Composite fields excluded from scalar-only default
+        assert "member" not in result
+        assert "members" not in result
+
+    def test_required_arg_field_excluded_from_all(self):
+        sel = FieldSelector("org", target_cls=lambda: Organization)
+        result = to_graphql(sel.ALL)
+        assert "members {" in result
+        assert "member {" not in result.replace("members {", "")
+
+    def test_required_arg_field_excluded_from_shallow(self):
+        sel = FieldSelector("org", target_cls=lambda: Organization)
+        result = to_graphql(sel.ALL_SHALLOW)
+        assert "members {" in result
+        assert "member {" not in result.replace("members {", "")
+
+    def test_required_arg_field_excluded_from_all_scalar(self):
+        sel = FieldSelector("org", target_cls=lambda: Organization)
+        result = to_graphql(sel.ALL_SCALAR)
+        # member excluded (required arg), members excluded (composite, no scalar children)
+        assert "member {" not in result
+
+
+# ---------------------------------------------------------------------------
+# Expansion modes: ALL, ALL_SCALAR, ALL_SHALLOW
+# ---------------------------------------------------------------------------
+
+
+class TestExpansionModes:
+    def test_all_recursively_expands(self):
+        sel = FieldSelector("user", target_cls=lambda: DeepUser)
+        result = to_graphql(sel.ALL)
+        # Should recurse into DeepAddress -> Country
+        assert "address { __typename" in result
+        assert "country { __typename" in result
+        assert "code" in result
+
+    def test_all_scalar_flat_scalars_only(self):
+        sel = FieldSelector("user", target_cls=lambda: DeepUser)
+        result = to_graphql(sel.ALL_SCALAR)
+        # Only scalar fields at the top level, no composites
+        assert result == "user { __typename id name }"
+        assert "address" not in result
+
+    def test_all_shallow_does_not_recurse(self):
+        sel = FieldSelector("user", target_cls=lambda: DeepUser)
+        result = to_graphql(sel.ALL_SHALLOW)
+        # Should include address but only its scalar fields (not country)
+        assert "address { __typename" in result
+        assert "country" not in result
+
+    def test_all_on_scalar_field_raises(self):
+        sel = FieldSelector("name")
+        with pytest.raises(AttributeError, match="Cannot use .ALL on scalar"):
+            sel.ALL
+
+    def test_all_scalar_on_scalar_field_raises(self):
+        sel = FieldSelector("name")
+        with pytest.raises(AttributeError, match="Cannot use .ALL_SCALAR"):
+            sel.ALL_SCALAR
+
+    def test_all_shallow_on_scalar_field_raises(self):
+        sel = FieldSelector("name")
+        with pytest.raises(AttributeError, match="Cannot use .ALL_SHALLOW"):
+            sel.ALL_SHALLOW
+
+    def test_expansion_mode_preserved_through_call(self):
+        sel = FieldSelector("user", target_cls=lambda: User, arg_types={"id": "ID!"})
+        result = to_graphql(sel(id="1").ALL_SCALAR)
+        assert 'user(id: "1") { __typename' in result
+        # ALL_SCALAR includes only scalar fields, no composites
+        assert "id" in result
+        assert "name" in result
+        assert "email" in result
+        assert "address" not in result
+        assert "posts" not in result
+
+    def test_expansion_mode_in_dir(self):
+        sel = FieldSelector("user", target_cls=lambda: User)
+        attrs = dir(sel)
+        assert "ALL" in attrs
+        assert "ALL_SCALAR" in attrs
+        assert "ALL_SHALLOW" in attrs
+
+    def test_expansion_mode_not_in_dir_for_scalar(self):
+        sel = FieldSelector("name")
+        attrs = dir(sel)
+        assert "ALL" not in attrs
+
+
+# ---------------------------------------------------------------------------
+# Cycle detection
+# ---------------------------------------------------------------------------
+
+
+class TestCycleDetection:
+    def test_all_handles_cycle(self):
+        sel = FieldSelector("a", target_cls=lambda: TypeA)
+        result = to_graphql(sel.ALL)
+        # Should expand TypeA -> TypeB but stop before cycling back to TypeA
+        assert "id" in result
+        assert "b { __typename" in result
+        # TypeB.a should not recurse back into TypeA
+        count = result.count("b {")
+        assert count == 1
+
+    def test_all_scalar_no_composites(self):
+        sel = FieldSelector("a", target_cls=lambda: TypeA)
+        result = to_graphql(sel.ALL_SCALAR)
+        assert "id" in result
+        # ALL_SCALAR should not include composite field 'b'
+        assert "b" not in result
+
+    def test_default_is_all_scalar(self):
+        """Default (ALL_SCALAR) includes only scalar fields."""
+        sel = FieldSelector("a", target_cls=lambda: TypeA)
+        result = to_graphql(sel)
+        assert "id" in result
+        assert "b" not in result
+
+
+# ---------------------------------------------------------------------------
+# Expansion helper functions directly
+# ---------------------------------------------------------------------------
+
+
+class TestAutoExpandFunctions:
+    def test_auto_expand_all_simple(self):
+        result = _auto_expand_all(Address)
+        assert set(result.split()) == {"street", "city", "zipCode"}
+
+    def test_auto_expand_all_recursive(self):
+        result = _auto_expand_all(DeepUser)
+        assert "address { __typename" in result
+        assert "country { __typename" in result
+
+    def test_auto_expand_all_scalar_simple(self):
+        result = _auto_expand_all_scalar(User)
+        # Only scalar fields, no composites
+        parts = result.split()
+        assert "id" in parts
+        assert "name" in parts
+        assert "email" in parts
+        assert "address" not in parts
+        assert "posts" not in parts
+
+    def test_auto_expand_shallow(self):
+        result = _auto_expand_shallow(DeepUser)
+        assert "address { __typename" in result
+        # Shallow: address children are scalar-only, no country
+        assert "country" not in result
+
+    def test_auto_expand_shallow_includes_composites(self):
+        result = _auto_expand_shallow(User)
+        assert "address { __typename" in result
+        assert "posts { __typename" in result

@@ -85,6 +85,7 @@ class FieldSelector:
         self._args: dict[str, Any] = {}
         self._sub_selections: list[FieldSelector] = []
         self._alias: str | None = None
+        self._expansion_mode: str | None = None
 
         # Build a proper __signature__ so notebooks show typed parameters.
         if self._arg_types:
@@ -116,6 +117,7 @@ class FieldSelector:
         node._args = dict(self._args)
         node._sub_selections = list(self._sub_selections)
         node._alias = self._alias
+        node._expansion_mode = self._expansion_mode
         return node
 
     # -- arguments via __call__ ------------------------------------------------
@@ -211,6 +213,12 @@ class FieldSelector:
     def __getattr__(self, name: str) -> FieldSelector | _InlineFragmentProxy:
         if name.startswith("_"):
             raise AttributeError(name)
+        if name in _EXPANSION_MODES:
+            if self._target_cls is None:
+                raise AttributeError(f"Cannot use .{name} on scalar field '{self._graphql_name}'")
+            node = self._clone()
+            node._expansion_mode = name
+            return node
         target = self._resolve_target()
         if target is not None:
             if _is_union(target):
@@ -244,6 +252,7 @@ class FieldSelector:
             attrs.append("__call__")
         target = self._resolve_target()
         if target is not None:
+            attrs.extend(_EXPANSION_MODES)
             if _is_union(target):
                 for member in target.__member_types__():
                     attrs.append(member.__name__)
@@ -514,21 +523,32 @@ def to_graphql(
         children = " ".join(children_strs)
         return f"{prefix}{name}{args_str} {{ __typename {children} }}"
 
-    # No explicit sub-selections but the field is a composite type:
-    # auto-expand with all scalar sub-fields.
+    # Expansion mode (explicit .ALL / .ALL_SCALAR / .ALL_SHALLOW) or
+    # implicit default (ALL) for composite types without sub-selections.
+    mode = sel._expansion_mode
     target = sel._resolve_target()
-    if target is not None:
-        if _is_union(target):
-            fragments = _build_auto_expand_fragments(target)
-            if fragments:
-                return f"{prefix}{name}{args_str} {{ __typename {fragments} }}"
-        else:
-            scalar_names = _scalar_field_names(target)
-            if scalar_names:
-                children = " ".join(scalar_names)
-                return f"{prefix}{name}{args_str} {{ __typename {children} }}"
+    if target is not None and not mode:
+        mode = "ALL_SCALAR"  # default expansion
+    if mode and target is not None:
+        expanded = _expand_by_mode(target, mode)
+        if expanded:
+            return f"{prefix}{name}{args_str} {{ __typename {expanded} }}"
 
     return f"{prefix}{name}{args_str}"
+
+
+def _expand_by_mode(target: type, mode: str) -> str:
+    """Dispatch to the appropriate expansion function for *mode*."""
+    if _is_union(target):
+        if mode == "ALL":
+            return _auto_expand_all_union(target, set())
+        # ALL_SCALAR and ALL_SHALLOW both use scalar-only fragments for unions
+        return _build_auto_expand_fragments(target)
+    if mode == "ALL":
+        return _auto_expand_all(target)
+    if mode == "ALL_SCALAR":
+        return _auto_expand_all_scalar(target)
+    return _auto_expand_shallow(target)
 
 
 def _scalar_field_names(target_cls: type) -> list[str]:
@@ -539,6 +559,114 @@ def _scalar_field_names(target_cls: type) -> list[str]:
             if isinstance(val, SchemaField) and val._target_cls is None:
                 names.append(val.graphql_name)
     return names
+
+
+# ---------------------------------------------------------------------------
+# Expansion helpers
+# ---------------------------------------------------------------------------
+
+_EXPANSION_MODES = frozenset({"ALL", "ALL_SCALAR", "ALL_SHALLOW"})
+
+
+def _has_required_args(sf: SchemaField) -> bool:
+    """Return True if *sf* has any non-null arguments (type ending with ``!``)."""
+    return any(t.endswith("!") for t in sf._arg_types.values())
+
+
+def _resolve_schema_field_target(sf: SchemaField) -> type | None:
+    """Resolve a SchemaField's ``_target_cls`` to an actual type or *None*."""
+    if sf._target_cls is None:
+        return None
+    if isinstance(sf._target_cls, type):
+        return sf._target_cls
+    return sf._target_cls()  # type: ignore[no-any-return]
+
+
+def _iter_eligible_fields(target_cls: type) -> list[tuple[SchemaField, type | None]]:
+    """Yield ``(SchemaField, resolved_target)`` for fields without required args.
+
+    Fields are deduplicated by GraphQL name (first occurrence in MRO wins).
+    """
+    seen_names: set[str] = set()
+    results: list[tuple[SchemaField, type | None]] = []
+    for klass in target_cls.__mro__:
+        for val in klass.__dict__.values():
+            if (
+                isinstance(val, SchemaField)
+                and val.graphql_name not in seen_names
+                and not _has_required_args(val)
+            ):
+                seen_names.add(val.graphql_name)
+                results.append((val, _resolve_schema_field_target(val)))
+    return results
+
+
+# -- ALL (recursive) --------------------------------------------------------
+
+
+def _auto_expand_all(target_cls: type, seen: set[type] | None = None) -> str:
+    """Recursively expand all fields without required args."""
+    if seen is None:
+        seen = set()
+    if target_cls in seen:
+        return ""
+    seen = seen | {target_cls}
+
+    parts: list[str] = []
+    for sf, field_target in _iter_eligible_fields(target_cls):
+        if field_target is None:
+            parts.append(sf.graphql_name)
+        elif _is_union(field_target):
+            frag = _auto_expand_all_union(field_target, seen)
+            if frag:
+                parts.append(f"{sf.graphql_name} {{ __typename {frag} }}")
+        else:
+            child = _auto_expand_all(field_target, seen)
+            if child:
+                parts.append(f"{sf.graphql_name} {{ __typename {child} }}")
+    return " ".join(parts)
+
+
+def _auto_expand_all_union(
+    union_target: type[GraphQLUnion],
+    seen: set[type],
+) -> str:
+    """Build inline fragments recursively expanding each member's fields."""
+    parts: list[str] = []
+    for member in union_target.__member_types__():
+        fields_str = _auto_expand_all(member, seen)
+        if fields_str:
+            parts.append(f"... on {member.__typename__} {{ {fields_str} }}")
+    return " ".join(parts)
+
+
+# -- ALL_SCALAR (flat scalar fields only) -----------------------------------
+
+
+def _auto_expand_all_scalar(target_cls: type) -> str:
+    """Return a space-separated list of scalar field names on *target_cls*."""
+    return " ".join(_scalar_field_names(target_cls))
+
+
+# -- ALL_SHALLOW (one level, no recursion into composites) ------------------
+
+
+def _auto_expand_shallow(target_cls: type) -> str:
+    """Expand all fields without required args; composites get scalar-only children."""
+    parts: list[str] = []
+    for sf, field_target in _iter_eligible_fields(target_cls):
+        if field_target is None:
+            parts.append(sf.graphql_name)
+        elif _is_union(field_target):
+            frag = _build_auto_expand_fragments(field_target)
+            if frag:
+                parts.append(f"{sf.graphql_name} {{ __typename {frag} }}")
+        else:
+            scalar_names = _scalar_field_names(field_target)
+            if scalar_names:
+                children = " ".join(scalar_names)
+                parts.append(f"{sf.graphql_name} {{ __typename {children} }}")
+    return " ".join(parts)
 
 
 def _to_literal(value: Any) -> str:
