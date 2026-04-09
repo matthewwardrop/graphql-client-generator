@@ -333,6 +333,30 @@ class TestFieldSelectorCall:
         assert result._args["input"].name == "Alice"
         assert result._args["input"].role == "ADMIN"
 
+    def test_flattened_input_accepts_dict(self):
+        """When input_arg and input_cls are set, a dict for the input arg is accepted."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class FakeInput:
+            name: str
+            role: str
+
+            def to_dict(self):
+                return {"name": self.name, "role": self.role}
+
+        sel = FieldSelector(
+            "createUser",
+            arg_types={"name": "String!", "role": "Role!"},
+            input_arg="input",
+            input_cls=FakeInput,
+        )
+        result = sel(input={"name": "Alice", "role": "ADMIN"})
+        assert "input" in result._args
+        assert isinstance(result._args["input"], FakeInput)
+        assert result._args["input"].name == "Alice"
+        assert result._args["input"].role == "ADMIN"
+
     def test_flattened_input_validation_propagates(self):
         """Input constructor errors propagate to the caller."""
         from dataclasses import dataclass
@@ -1095,6 +1119,10 @@ class TestToLiteral:
 
     def test_dict_single_key(self):
         assert _to_literal({"x": 1}) == "{x: 1}"
+
+    def test_dict_snake_case_keys_converted(self):
+        result = _to_literal({"my_ids": ["abc"], "is_active": True})
+        assert result == '{myIds: ["abc"], isActive: true}'
 
 
 # ---------------------------------------------------------------------------

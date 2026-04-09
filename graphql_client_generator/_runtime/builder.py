@@ -138,6 +138,20 @@ class FieldSelector:
         """
         if not self._arg_types:
             raise TypeError(f"Field '{self._graphql_name}' takes no arguments")
+
+        # Flattened input shortcut: accept a dict for the input arg name
+        # (e.g. `field(input={"title": "foo"})` instead of `field(title="foo")`).
+        if (
+            self._input_arg
+            and self._input_cls
+            and len(kwargs) == 1
+            and self._input_arg in kwargs
+            and isinstance(kwargs[self._input_arg], dict)
+        ):
+            node = self._clone()
+            node._args = {self._input_arg: self._input_cls(**kwargs[self._input_arg])}
+            return node
+
         for key in kwargs:
             if key not in self._arg_types:
                 raise TypeError(
@@ -159,9 +173,7 @@ class FieldSelector:
             )
         node = self._clone()
         if self._input_arg and self._input_cls:
-            # Flatten mode: forward kwargs to Input constructor, wrap result.
-            input_obj = self._input_cls(**kwargs)
-            node._args = {self._input_arg: input_obj}
+            node._args = {self._input_arg: self._input_cls(**kwargs)}
         else:
             node._args = dict(kwargs)
         return node
@@ -881,7 +893,9 @@ def _to_literal(value: Any) -> str:
         inner = ", ".join(_to_literal(v) for v in value)
         return f"[{inner}]"
     if isinstance(value, dict):
-        inner = ", ".join(f"{k}: {_to_literal(v)}" for k, v in value.items())
+        from .serialization import to_camel_case
+
+        inner = ", ".join(f"{to_camel_case(k)}: {_to_literal(v)}" for k, v in value.items())
         return f"{{{inner}}}"
     if value is None:
         return "null"
